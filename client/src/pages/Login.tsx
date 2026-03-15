@@ -1,7 +1,17 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+
+const SIGNIN_TIMEOUT_MS = 20000;
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return 'Sign-in failed. Try again.';
+}
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -11,54 +21,74 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      const { data, error: err } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-      if (err) {
-        setError(err.message || 'Invalid email or password.');
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!isSupabaseConfigured) {
+        setError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment.');
         return;
       }
-      if (!data.session?.access_token) {
-        setError('Login failed. No session returned.');
-        return;
+      setError('');
+      setLoading(true);
+
+      const timeoutId = setTimeout(() => {
+        setError('Sign-in is taking too long. Check your connection and try again.');
+        setLoading(false);
+      }, SIGNIN_TIMEOUT_MS);
+
+      try {
+        const { data, error: err } = await supabase.auth.signInWithPassword({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+
+        if (err) {
+          clearTimeout(timeoutId);
+          setError(err.message || 'Invalid email or password.');
+          return;
+        }
+        if (!data.session?.access_token) {
+          clearTimeout(timeoutId);
+          setError('Login failed. No session returned.');
+          return;
+        }
+
+        const me = await login(data.session.access_token);
+        clearTimeout(timeoutId);
+        if (me) {
+          navigate('/', { replace: true });
+        } else {
+          setError('Could not load your profile. Try again.');
+        }
+      } catch (err) {
+        clearTimeout(timeoutId);
+        const msg = getErrorMessage(err);
+        if (msg === 'Profile not found' || msg.includes('profile')) {
+          setError('Account not set up. Please register first.');
+        } else if (
+          msg.includes('fetch') ||
+          msg.includes('network') ||
+          msg.includes('Failed') ||
+          msg.includes('Load')
+        ) {
+          setError("Can't reach server. If testing locally, run: npx netlify dev");
+        } else {
+          setError(msg);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        setLoading(false);
       }
-      const me = await login(data.session.access_token);
-      if (me) {
-        navigate('/', { replace: true });
-      } else {
-        setError('Could not load your profile. Try again.');
-      }
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'object' && err !== null && 'message' in err
-            ? String((err as { message: unknown }).message)
-            : 'Sign-in failed. Try again.';
-      if (msg === 'Profile not found' || msg.includes('profile')) {
-        setError('Account not set up. Please register first.');
-      } else if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed') || msg.includes('Load')) {
-        setError('Cannot reach server. If you\'re testing locally, run "npx netlify dev" so the API works.');
-      } else {
-        setError(msg);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [email, password, login, navigate]
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
       <div className="w-full max-w-sm rounded-xl bg-slate-800/80 border border-slate-600 shadow-2xl p-8">
         <h1 className="font-display text-3xl font-bold text-amber-400 text-center mb-2">Fame and Fortune</h1>
         <p className="text-slate-400 text-center text-sm mb-6">Sign in to continue</p>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <input
             type="email"
             placeholder="Email"
@@ -67,6 +97,8 @@ export default function Login() {
             className="w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             required
             autoComplete="email"
+            disabled={loading}
+            aria-label="Email"
           />
           <input
             type="password"
@@ -76,19 +108,28 @@ export default function Login() {
             className="w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             required
             autoComplete="current-password"
+            disabled={loading}
+            aria-label="Password"
           />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {error && (
+            <p className="text-red-400 text-sm" role="alert">
+              {error}
+            </p>
+          )}
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-900 font-semibold disabled:opacity-50 transition"
+            className="w-full py-3 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:pointer-events-none text-slate-900 font-semibold transition"
+            aria-busy={loading}
           >
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
         <p className="mt-4 text-center text-slate-400 text-sm">
           Don&apos;t have an account?{' '}
-          <Link to="/register" className="text-amber-400 hover:underline">Register</Link>
+          <Link to="/register" className="text-amber-400 hover:underline">
+            Register
+          </Link>
         </p>
       </div>
     </div>
