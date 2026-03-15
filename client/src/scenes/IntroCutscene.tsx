@@ -1,36 +1,67 @@
 import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
+import { introCutscene, type CutsceneConfig } from '../config/cutscenes';
 
 interface IntroCutsceneProps {
   onComplete: () => void;
+  /** Override config (default: introCutscene). Use for different cutscenes with same component. */
+  config?: CutsceneConfig;
 }
 
-export default function IntroCutscene({ onComplete }: IntroCutsceneProps) {
+export default function IntroCutscene({ onComplete, config: configOverride }: IntroCutsceneProps) {
+  const config = configOverride ?? introCutscene;
   const containerRef = useRef<HTMLDivElement>(null);
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const subRef = useRef<HTMLParagraphElement>(null);
+  const stepRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [showSkip, setShowSkip] = useState(false);
 
   useEffect(() => {
     const tl = gsap.timeline({ onComplete });
-    tl.fromTo(containerRef.current, { opacity: 0 }, { opacity: 1, duration: 0.8 })
-      .fromTo(titleRef.current, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 1, ease: 'power2.out' }, '-=0.4')
-      .fromTo(subRef.current, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, ease: 'power2.out', onComplete: () => setShowSkip(true) }, '-=0.5')
-      .to(containerRef.current, { opacity: 0, duration: 0.8, delay: 1.5 }, '+=1');
+    tl.fromTo(containerRef.current, { opacity: 0 }, { opacity: 1, duration: 0.8 });
+
+    config.steps.forEach((step, i) => {
+      const el = stepRefs.current[i];
+      if (!el) return;
+      const duration = step.duration ?? 0.8;
+      const ease = (step.ease as gsap.EaseString) ?? 'power2.out';
+      const fromY = step.fromY ?? 0;
+      const position = step.positionOffset ?? '-=0.2';
+
+      tl.fromTo(
+        el,
+        { y: fromY, opacity: 0 },
+        {
+          y: 0,
+          opacity: 1,
+          duration,
+          ease,
+          onComplete: step.showSkipAfter ? () => setShowSkip(true) : undefined,
+        },
+        position
+      );
+    });
+
+    const hold = config.holdBeforeFade ?? 1.5;
+    const fadeOut = config.fadeOutDuration ?? 0.8;
+    tl.to(containerRef.current, { opacity: 0, duration: fadeOut, delay: hold }, `+=1`);
+
     return () => { tl.kill(); };
-  }, [onComplete]);
+  }, [onComplete, config]);
 
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950 pointer-events-auto"
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center pointer-events-auto ${config.overlayClassName ?? 'bg-slate-950'}`}
     >
-      <h1 ref={titleRef} className="font-display text-5xl md:text-6xl font-bold text-amber-400 mb-4">
-        Fame and Fortune
-      </h1>
-      <p ref={subRef} className="text-slate-400 text-lg">
-        Roll the dice. Claim your aura.
-      </p>
+      {config.steps.map((step, i) => (
+        <div
+          key={`${config.id}-${i}`}
+          ref={(el) => { stepRefs.current[i] = el; }}
+          className={step.className}
+          style={{ opacity: 0 }}
+        >
+          {step.type === 'spacer' ? null : step.text}
+        </div>
+      ))}
       {showSkip && (
         <button
           onClick={onComplete}

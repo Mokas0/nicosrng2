@@ -20,13 +20,23 @@ export async function api<T>(
   return data as T;
 }
 
+export interface InventoryAura {
+  auraId: string;
+  obtainedAt: string;
+  name: string;
+  rarity: string;
+  chance: number;
+  visualId: string;
+  description: string;
+}
+
 export interface UserMe {
   id: string;
   username: string;
   gold: number;
   hasAutoRoll: boolean;
   hasQuickRoll: boolean;
-  auras: { auraId: string; obtainedAt: string }[];
+  auras: InventoryAura[];
 }
 
 export interface RollAura {

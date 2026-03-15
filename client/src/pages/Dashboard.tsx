@@ -5,6 +5,7 @@ import RollReveal from '../scenes/RollReveal';
 import IntroCutscene from '../scenes/IntroCutscene';
 import ChatPanel from '../components/ChatPanel';
 import Shop from '../components/Shop';
+import Inventory from '../components/Inventory';
 
 const PASSIVE_GOLD_INTERVAL_MS = 30_000;
 
@@ -16,6 +17,7 @@ export default function Dashboard() {
   const [batchResults, setBatchResults] = useState<RollAura[] | null>(null);
   const [autoRollEnabled, setAutoRollEnabled] = useState(false);
   const [showIntro, setShowIntro] = useState(() => !sessionStorage.getItem('fame-intro-seen'));
+  const [showInventory, setShowInventory] = useState(false);
   const autoRollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const passiveGoldTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -104,6 +106,13 @@ export default function Dashboard() {
       <header className="flex items-center justify-between px-4 py-3 bg-slate-800/80 border-b border-slate-700">
         <h1 className="font-display text-xl font-bold text-amber-400">Fame and Fortune</h1>
         <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setShowInventory(true)}
+            className="text-slate-300 hover:text-amber-400 text-sm font-medium flex items-center gap-1"
+          >
+            <span className="text-lg">📦</span> Inventory {user?.auras?.length ? `(${user.auras.length})` : ''}
+          </button>
           <span className="text-amber-400 font-semibold flex items-center gap-1">
             <span className="text-lg">🪙</span> {user?.gold ?? 0} Gold
           </span>
@@ -169,6 +178,9 @@ export default function Dashboard() {
       ) : lastAura ? (
         <RollReveal aura={lastAura} onClose={closeReveal} />
       ) : null)}
+      {showInventory && user && (
+        <Inventory auras={user.auras} onClose={() => setShowInventory(false)} />
+      )}
     </div>
   );
 }

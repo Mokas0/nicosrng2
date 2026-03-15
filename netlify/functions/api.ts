@@ -99,13 +99,27 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false };
     }
     const { data: inv } = await supabaseAdmin.from('user_auras').select('aura_id, obtained_at').eq('user_id', user.id);
+    const { data: aurasCatalog } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
+    const aurasMap = new Map((aurasCatalog || []).map((a) => [a.id, a]));
+    const auras = (inv || []).map((r) => {
+      const aura = aurasMap.get(r.aura_id);
+      return {
+        auraId: r.aura_id,
+        obtainedAt: r.obtained_at,
+        name: aura?.name ?? 'Unknown',
+        rarity: aura?.rarity ?? 'common',
+        chance: aura?.chance ?? 0,
+        visualId: aura?.visual_id ?? '',
+        description: aura?.description ?? '',
+      };
+    });
     return json({
       id: profile.id,
       username: profile.username,
       gold: profile.gold,
       hasAutoRoll: profile.has_auto_roll,
       hasQuickRoll: profile.has_quick_roll,
-      auras: (inv || []).map((r) => ({ auraId: r.aura_id, obtainedAt: r.obtained_at })),
+      auras,
     });
   }
 
