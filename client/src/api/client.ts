@@ -36,6 +36,8 @@ export interface PotionInventoryItem {
   name: string;
   luckPercent: number;
   goldCost: number;
+  durationMinutes?: number | null;
+  rollSpeedPercent?: number | null;
 }
 
 export interface PotionCatalogItem {
@@ -44,6 +46,12 @@ export interface PotionCatalogItem {
   description: string;
   luck_percent: number;
   gold_cost: number;
+  duration_minutes?: number | null;
+  roll_speed_percent?: number | null;
+}
+
+export interface SpecialShopItem extends PotionCatalogItem {
+  special_shop_price: number | null;
 }
 
 export interface UserMe {
@@ -53,6 +61,8 @@ export interface UserMe {
   hasAutoRoll: boolean;
   hasQuickRoll: boolean;
   usernameChangedAt?: string | null;
+  rollSpeedPercent?: number;
+  rollSpeedEndsAt?: string | null;
   auras: InventoryAura[];
   potionInventory?: PotionInventoryItem[];
 }
@@ -88,6 +98,11 @@ export const user = {
       method: 'POST',
       body: JSON.stringify({ username: username.trim() }),
     }),
+  usePotion: (potionId: string) =>
+    api<{ success: boolean; rollSpeedPercent: number; rollSpeedEndsAt: string }>('/user/use-potion', {
+      method: 'POST',
+      body: JSON.stringify({ potionId }),
+    }),
 };
 
 export const roll = {
@@ -111,6 +126,13 @@ export const shop = {
   getPotions: () => api<PotionCatalogItem[]>('/potions'),
   buyPotion: (potionId: string) =>
     api<{ success: boolean; newBalance: number; potionId: string }>('/shop/buy-potion', {
+      method: 'POST',
+      body: JSON.stringify({ potionId }),
+    }),
+  getSpecialStatus: () => api<{ open: boolean; endsAt?: string }>('/shop/special-status'),
+  getSpecialItems: () => api<SpecialShopItem[]>('/shop/special-items'),
+  buySpecialPotion: (potionId: string) =>
+    api<{ success: boolean; newBalance: number; potionId: string }>('/shop/buy-special-potion', {
       method: 'POST',
       body: JSON.stringify({ potionId }),
     }),

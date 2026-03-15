@@ -48,6 +48,19 @@ export default function Dashboard() {
     };
   }, [setGold]);
 
+  const rollSpeedPercent = user?.rollSpeedPercent ?? 0;
+  const rollSpeedEndsAt = user?.rollSpeedEndsAt ? new Date(user.rollSpeedEndsAt).getTime() : 0;
+  const rollSpeedActive = rollSpeedEndsAt > Date.now();
+  const effectiveRollIntervalMs = rollSpeedActive
+    ? Math.max(500, AUTO_ROLL_INTERVAL_MS / (1 + rollSpeedPercent / 100))
+    : AUTO_ROLL_INTERVAL_MS;
+
+  useEffect(() => {
+    if (!rollSpeedActive || rollSpeedEndsAt <= 0) return;
+    const t = setTimeout(() => refreshUser(), rollSpeedEndsAt - Date.now() + 500);
+    return () => clearTimeout(t);
+  }, [rollSpeedActive, rollSpeedEndsAt, refreshUser]);
+
   useEffect(() => {
     if (!autoRollEnabled || !user?.hasAutoRoll || rolling) return;
     const id = setInterval(async () => {
@@ -60,12 +73,12 @@ export default function Dashboard() {
       } catch {
         setRolling(false);
       }
-    }, AUTO_ROLL_INTERVAL_MS);
+    }, effectiveRollIntervalMs);
     autoRollTimerRef.current = id;
     return () => {
       if (autoRollTimerRef.current) clearInterval(autoRollTimerRef.current);
     };
-  }, [autoRollEnabled, user?.hasAutoRoll, rolling, setGold]);
+  }, [autoRollEnabled, user?.hasAutoRoll, rolling, setGold, effectiveRollIntervalMs]);
 
   const availablePotions = (user?.potionInventory ?? []).filter((p) => p.quantity > 0);
 
@@ -154,6 +167,11 @@ export default function Dashboard() {
           <span className="text-amber-400 font-semibold flex items-center gap-1">
             <span className="text-lg">🪙</span> {user?.gold ?? 0} Gold
           </span>
+          {rollSpeedActive && (
+            <span className="text-emerald-400 text-xs font-medium" title={`+${rollSpeedPercent}% roll speed`}>
+              ⚡ +{rollSpeedPercent}% speed {rollSpeedEndsAt > 0 && `(${Math.ceil((rollSpeedEndsAt - Date.now()) / 60000)}m)`}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => {

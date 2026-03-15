@@ -17,6 +17,9 @@ const PASSIVE_GOLD_AMOUNT = 5;
 const USERNAME_CHANGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const USERNAME_MIN_LENGTH = 2;
 const USERNAME_MAX_LENGTH = 24;
+const SPECIAL_SHOP_DURATION_MS = 30 * 60 * 1000; // 30 min
+const SPECIAL_SHOP_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 h
+const SPECIAL_SHOP_CHANCE = 0.1; // 10%
 
 function json(body: unknown, status = 200) {
   return { statusCode: status, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } };
@@ -103,7 +106,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     const authErr = requireAuth();
     if (authErr) return authErr.response;
     if (!user) return json({ error: 'Unauthorized' }, 401);
-    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at').eq('id', user.id).single();
+    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at').eq('id', user.id).single();
     if (!profile) {
       const base = (user.user_metadata?.username as string) || user.email?.split('@')[0] || 'player';
       const username = base.slice(0, 18) + (user.id.slice(0, 2)); // ensure unique
@@ -116,7 +119,15 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         created_at: new Date().toISOString(),
       });
       if (insertErr) return json({ error: 'Profile not found' }, 404);
-      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null };
+      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null };
+    }
+    const now = Date.now();
+    let rollSpeedPercent = (profile as { roll_speed_percent?: number }).roll_speed_percent ?? 0;
+    let rollSpeedEndsAt = (profile as { roll_speed_ends_at?: string | null }).roll_speed_ends_at ?? null;
+    if (rollSpeedEndsAt && new Date(rollSpeedEndsAt).getTime() < now) {
+      rollSpeedPercent = 0;
+      rollSpeedEndsAt = null;
+      await supabaseAdmin.from('profiles').update({ roll_speed_percent: 0, roll_speed_ends_at: null }).eq('id', user.id);
     }
     const { data: inv } = await supabaseAdmin.from('user_auras').select('aura_id, obtained_at').eq('user_id', user.id);
     const { data: aurasCatalog } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
@@ -134,16 +145,18 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       };
     });
     const { data: up } = await supabaseAdmin.from('user_potions').select('potion_id, quantity').eq('user_id', user.id);
-    const { data: potionsCatalog } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost');
+    const { data: potionsCatalog } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost, duration_minutes, roll_speed_percent');
     const potionsMap = new Map((potionsCatalog || []).map((p) => [p.id, p]));
     const potionInventory = (up || []).map((r) => {
-      const p = potionsMap.get(r.potion_id);
+      const p = potionsMap.get(r.potion_id) as { duration_minutes?: number | null; roll_speed_percent?: number | null } | undefined;
       return {
         potionId: r.potion_id,
         quantity: r.quantity,
         name: p?.name ?? '',
         luckPercent: p?.luck_percent ?? 0,
         goldCost: p?.gold_cost ?? 0,
+        durationMinutes: p?.duration_minutes ?? null,
+        rollSpeedPercent: p?.roll_speed_percent ?? null,
       };
     });
     const usernameChangedAt = (profile as { username_changed_at?: string | null }).username_changed_at ?? null;
@@ -154,9 +167,37 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       hasAutoRoll: profile.has_auto_roll,
       hasQuickRoll: profile.has_quick_roll,
       usernameChangedAt,
+      rollSpeedPercent,
+      rollSpeedEndsAt,
       auras,
       potionInventory,
     });
+  }
+
+  // POST /api/user/use-potion – consume a roll-speed potion to activate buff (body: { potionId })
+  if (path === '/user/use-potion' && method === 'POST') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    let body: { potionId?: string } = {};
+    try {
+      body = event.body ? JSON.parse(event.body) : {};
+    } catch {
+      return err('Invalid JSON');
+    }
+    const potionId = body.potionId;
+    if (!potionId || typeof potionId !== 'string') return err('potionId required', 400);
+    const { data: pot } = await supabaseAdmin.from('potions').select('id, duration_minutes, roll_speed_percent').eq('id', potionId).single();
+    if (!pot) return err('Potion not found', 404);
+    const durationMin = (pot as { duration_minutes?: number | null }).duration_minutes;
+    const speedPercent = (pot as { roll_speed_percent?: number | null }).roll_speed_percent;
+    if (durationMin == null || durationMin < 1 || speedPercent == null || speedPercent < 1) return err('This potion cannot be used as a buff', 400);
+    const { data: up } = await supabaseAdmin.from('user_potions').select('quantity').eq('user_id', user.id).eq('potion_id', potionId).single();
+    if (!up || up.quantity < 1) return err('No potion available', 400);
+    const endsAt = new Date(Date.now() + durationMin * 60 * 1000).toISOString();
+    await supabaseAdmin.from('user_potions').update({ quantity: up.quantity - 1 }).eq('user_id', user.id).eq('potion_id', potionId);
+    await supabaseAdmin.from('profiles').update({ roll_speed_percent: speedPercent, roll_speed_ends_at: endsAt }).eq('id', user.id);
+    return json({ success: true, rollSpeedPercent: speedPercent, rollSpeedEndsAt: endsAt });
   }
 
   // POST /api/user/change-username – body: { username: string }, once per week, unique
@@ -192,9 +233,9 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     return json({ username, success: true });
   }
 
-  // GET /api/potions – catalog for shop (no auth required)
+  // GET /api/potions – catalog for normal shop (excludes special-shop-only)
   if (path === '/potions' && method === 'GET') {
-    const { data: list } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost').order('sort_order', { ascending: true });
+    const { data: list } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost, duration_minutes, roll_speed_percent').or('is_special_shop_only.is.null,is_special_shop_only.eq.false').order('sort_order', { ascending: true });
     return json(list ?? []);
   }
 
@@ -350,12 +391,79 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     }
     const potionId = body.potionId;
     if (!potionId || typeof potionId !== 'string') return err('potionId required', 400);
-    const { data: pot } = await supabaseAdmin.from('potions').select('id, gold_cost').eq('id', potionId).single();
+    const { data: pot } = await supabaseAdmin.from('potions').select('id, gold_cost, is_special_shop_only').eq('id', potionId).single();
     if (!pot) return err('Potion not found', 404);
+    if ((pot as { is_special_shop_only?: boolean }).is_special_shop_only) return err('This potion is only available in the Special Shop', 400);
     const { data: u } = await supabaseAdmin.from('profiles').select('gold').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
     if (u.gold < pot.gold_cost) return err('Not enough Gold', 400);
     const newGold = u.gold - pot.gold_cost;
+    await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
+    const { data: existing } = await supabaseAdmin.from('user_potions').select('quantity').eq('user_id', user.id).eq('potion_id', potionId).maybeSingle();
+    if (existing) {
+      await supabaseAdmin.from('user_potions').update({ quantity: existing.quantity + 1 }).eq('user_id', user.id).eq('potion_id', potionId);
+    } else {
+      await supabaseAdmin.from('user_potions').insert({ user_id: user.id, potion_id: potionId, quantity: 1 });
+    }
+    return json({ success: true, newBalance: newGold, potionId });
+  }
+
+  // GET /api/shop/special-status – is the rare special shop open for this user? (auth required)
+  if (path === '/shop/special-status' && method === 'GET') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    const { data: profile } = await supabaseAdmin.from('profiles').select('special_shop_ends_at, special_shop_last_roll_at').eq('id', user.id).single();
+    if (!profile) return json({ open: false });
+    const now = Date.now();
+    const endsAt = (profile as { special_shop_ends_at?: string | null }).special_shop_ends_at;
+    const lastRoll = (profile as { special_shop_last_roll_at?: string | null }).special_shop_last_roll_at;
+    if (endsAt && new Date(endsAt).getTime() > now) return json({ open: true, endsAt });
+    if (endsAt) await supabaseAdmin.from('profiles').update({ special_shop_ends_at: null }).eq('id', user.id);
+    const lastRollTime = lastRoll ? new Date(lastRoll).getTime() : 0;
+    if (now - lastRollTime < SPECIAL_SHOP_COOLDOWN_MS) return json({ open: false });
+    const roll = Math.random();
+    const open = roll < SPECIAL_SHOP_CHANCE;
+    const newEndsAt = open ? new Date(now + SPECIAL_SHOP_DURATION_MS).toISOString() : null;
+    await supabaseAdmin.from('profiles').update({ special_shop_last_roll_at: new Date(now).toISOString(), special_shop_ends_at: newEndsAt }).eq('id', user.id);
+    return json(open ? { open: true, endsAt: newEndsAt } : { open: false });
+  }
+
+  // GET /api/shop/special-items – list special-shop potions (only when shop is open for user)
+  if (path === '/shop/special-items' && method === 'GET') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    const { data: profile } = await supabaseAdmin.from('profiles').select('special_shop_ends_at').eq('id', user.id).single();
+    const endsAt = profile && (profile as { special_shop_ends_at?: string | null }).special_shop_ends_at;
+    if (!endsAt || new Date(endsAt).getTime() <= Date.now()) return json([]);
+    const { data: list } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost, duration_minutes, roll_speed_percent, special_shop_price').eq('is_special_shop_only', true).order('sort_order', { ascending: true });
+    return json(list ?? []);
+  }
+
+  // POST /api/shop/buy-special-potion – body: { potionId } (only when special shop is open)
+  if (path === '/shop/buy-special-potion' && method === 'POST') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    let body: { potionId?: string } = {};
+    try {
+      body = event.body ? JSON.parse(event.body) : {};
+    } catch {
+      return err('Invalid JSON');
+    }
+    const potionId = body.potionId;
+    if (!potionId || typeof potionId !== 'string') return err('potionId required', 400);
+    const { data: profile } = await supabaseAdmin.from('profiles').select('gold, special_shop_ends_at').eq('id', user.id).single();
+    if (!profile) return json({ error: 'Profile not found' }, 404);
+    const endsAt = (profile as { special_shop_ends_at?: string | null }).special_shop_ends_at;
+    if (!endsAt || new Date(endsAt).getTime() <= Date.now()) return err('Special shop is not open', 400);
+    const { data: pot } = await supabaseAdmin.from('potions').select('id, is_special_shop_only, special_shop_price').eq('id', potionId).single();
+    if (!pot || !(pot as { is_special_shop_only?: boolean }).is_special_shop_only) return err('Not a special shop item', 404);
+    const price = (pot as { special_shop_price?: number | null }).special_shop_price;
+    if (price == null || price < 0) return err('Item not for sale', 400);
+    if (profile.gold < price) return err('Not enough Gold', 400);
+    const newGold = profile.gold - price;
     await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
     const { data: existing } = await supabaseAdmin.from('user_potions').select('quantity').eq('user_id', user.id).eq('potion_id', potionId).maybeSingle();
     if (existing) {
