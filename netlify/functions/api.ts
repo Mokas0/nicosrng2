@@ -145,7 +145,12 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'netlify/functions/api.ts',message:'/user/me profile insert failed',data:{userId:user.id,username,code:insertErr.code,message:insertErr.message},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
         // #endregion
         if (insertErr.code === '23505') {
-          const { data: existing } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
+          const selectProfile = () => supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
+          let existing = (await selectProfile()).data;
+          for (let i = 0; !existing && i < 3; i++) {
+            await new Promise((r) => setTimeout(r, 100 + i * 100));
+            existing = (await selectProfile()).data;
+          }
           if (existing) {
             profile = existing;
           } else {
@@ -160,7 +165,11 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
             });
             if (retryErr) {
               if (retryErr.code === '23505') {
-                const { data: existing2 } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
+                let existing2 = (await selectProfile()).data;
+                for (let j = 0; !existing2 && j < 3; j++) {
+                  await new Promise((r) => setTimeout(r, 100 + j * 100));
+                  existing2 = (await selectProfile()).data;
+                }
                 if (existing2) profile = existing2;
               }
               if (!profile) return json({ error: 'Profile not found', insertErrorCode: retryErr.code, insertErrorMessage: retryErr.message }, 404);
