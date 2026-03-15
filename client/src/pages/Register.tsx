@@ -58,7 +58,7 @@ export default function Register() {
         // unique violation = profile already exists (e.g. resend confirmation)
       }
       if (data.session?.access_token) {
-        login(data.session.access_token);
+        await login(data.session.access_token);
         navigate('/');
       } else {
         setError('Check your email to confirm your account, then sign in.');

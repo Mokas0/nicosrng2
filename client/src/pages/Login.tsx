@@ -22,7 +22,7 @@ export default function Login() {
       });
       if (err) throw err;
       if (data.session?.access_token) {
-        login(data.session.access_token);
+        await login(data.session.access_token);
         navigate('/');
       } else {
         setError('Login failed');

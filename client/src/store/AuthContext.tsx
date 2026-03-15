@@ -9,7 +9,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (token: string) => void;
+  login: (token: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
   setGold: (n: number) => void;
@@ -63,9 +63,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [refreshUser]);
 
-  const login = useCallback((token: string) => {
+  const login = useCallback(async (token: string) => {
     localStorage.setItem('token', token);
-    refreshUser();
+    await refreshUser();
   }, [refreshUser]);
 
   const logout = useCallback(async () => {
