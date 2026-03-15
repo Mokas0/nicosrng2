@@ -54,6 +54,8 @@ export interface SpecialShopItem extends PotionCatalogItem {
   special_shop_price: number | null;
 }
 
+export type DuplicateAuraBehavior = 'keep' | 'sacrifice' | 'auto';
+
 export interface UserMe {
   id: string;
   username: string;
@@ -63,6 +65,7 @@ export interface UserMe {
   usernameChangedAt?: string | null;
   rollSpeedPercent?: number;
   rollSpeedEndsAt?: string | null;
+  duplicateAuraBehavior?: DuplicateAuraBehavior;
   auras: InventoryAura[];
   potionInventory?: PotionInventoryItem[];
 }
@@ -81,6 +84,7 @@ export interface RollResponse {
   newBalance: number;
   goldEarned: number;
   firstTime: boolean;
+  sacrificed?: boolean;
 }
 
 export const auth = {
@@ -102,6 +106,11 @@ export const user = {
     api<{ success: boolean; rollSpeedPercent: number; rollSpeedEndsAt: string }>('/user/use-potion', {
       method: 'POST',
       body: JSON.stringify({ potionId }),
+    }),
+  updateDuplicateAuraBehavior: (behavior: DuplicateAuraBehavior) =>
+    api<{ success: boolean; duplicateAuraBehavior: DuplicateAuraBehavior }>('/user/duplicate-aura-behavior', {
+      method: 'PATCH',
+      body: JSON.stringify({ duplicateAuraBehavior: behavior }),
     }),
 };
 

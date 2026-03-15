@@ -15,6 +15,8 @@ export default function Dashboard() {
   const { user, setGold, refreshUser } = useAuth();
   const [rolling, setRolling] = useState(false);
   const [lastAura, setLastAura] = useState<RollAura | null>(null);
+  const [lastGoldEarned, setLastGoldEarned] = useState<number | undefined>();
+  const [lastSacrificed, setLastSacrificed] = useState(false);
   const [showReveal, setShowReveal] = useState(false);
   const [batchResults, setBatchResults] = useState<RollAura[] | null>(null);
   const [autoRollEnabled, setAutoRollEnabled] = useState(false);
@@ -69,6 +71,8 @@ export default function Dashboard() {
         const res = await rollApi.single();
         setGold(res.newBalance);
         setLastAura(res.aura);
+        setLastGoldEarned(res.goldEarned);
+        setLastSacrificed(res.sacrificed ?? false);
         setShowReveal(true);
       } catch {
         setRolling(false);
@@ -94,12 +98,14 @@ export default function Dashboard() {
         setBatchResults(res.results);
         setShowReveal(true);
         setLastAura(res.results[res.results.length - 1] ?? null);
-      } else {
-        const res = await rollApi.single(potionId);
-        setGold(res.newBalance);
-        setLastAura(res.aura);
-        setShowReveal(true);
-      }
+        } else {
+          const res = await rollApi.single(potionId);
+          setGold(res.newBalance);
+          setLastAura(res.aura);
+          setLastGoldEarned(res.goldEarned);
+          setLastSacrificed(res.sacrificed ?? false);
+          setShowReveal(true);
+        }
       if (potionId) {
         setUsePotionId('');
         refreshUser();
@@ -114,6 +120,8 @@ export default function Dashboard() {
   function closeReveal() {
     setShowReveal(false);
     setLastAura(null);
+    setLastGoldEarned(undefined);
+    setLastSacrificed(false);
     setBatchResults(null);
     setRolling(false);
   }
@@ -260,10 +268,18 @@ export default function Dashboard() {
       {showReveal && (batchResults ? (
         <RollReveal auras={batchResults} onClose={closeReveal} />
       ) : lastAura ? (
-        <RollReveal aura={lastAura} onClose={closeReveal} />
+        <RollReveal aura={lastAura} goldEarned={lastGoldEarned} sacrificed={lastSacrificed} onClose={closeReveal} />
       ) : null)}
       {showInventory && user && (
-        <Inventory auras={user.auras} onClose={() => setShowInventory(false)} />
+        <Inventory
+          auras={user.auras}
+          duplicateAuraBehavior={user.duplicateAuraBehavior ?? 'keep'}
+          onUpdateDuplicateAuraBehavior={async (behavior) => {
+            await userApi.updateDuplicateAuraBehavior(behavior);
+            await refreshUser();
+          }}
+          onClose={() => setShowInventory(false)}
+        />
       )}
       {showUsernameModal && (
         <div

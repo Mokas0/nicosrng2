@@ -14,10 +14,12 @@ const RARITY_COLORS: Record<string, string> = {
 interface RollRevealProps {
   aura?: RollAura;
   auras?: RollAura[];
+  goldEarned?: number;
+  sacrificed?: boolean;
   onClose: () => void;
 }
 
-export default function RollReveal({ aura, auras, onClose }: RollRevealProps) {
+export default function RollReveal({ aura, auras, goldEarned, sacrificed, onClose }: RollRevealProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const glowRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,9 @@ export default function RollReveal({ aura, auras, onClose }: RollRevealProps) {
         </p>
         <h2 className="font-display text-3xl font-bold text-white mb-2">{displayAura.name}</h2>
         <p className="text-slate-400 text-sm mb-4">1 in {displayAura.chance.toLocaleString()}</p>
+        {sacrificed && goldEarned != null && (
+          <p className="text-amber-400 text-sm font-medium mb-2">Sacrificed for +{goldEarned} gold!</p>
+        )}
         {isBatch && auras && (
           <div className="mb-4 p-3 rounded-lg bg-slate-700/50 max-h-32 overflow-y-auto">
             <p className="text-slate-400 text-xs mb-2">This batch:</p>

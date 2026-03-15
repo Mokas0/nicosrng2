@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import type { InventoryAura } from '../api/client';
+import type { InventoryAura, DuplicateAuraBehavior } from '../api/client';
 
 const RARITY_COLORS: Record<string, string> = {
   common: '#9ca3af',
@@ -21,13 +21,15 @@ const RARITY_ORDER: Record<string, number> = {
 
 interface InventoryProps {
   auras: InventoryAura[];
+  duplicateAuraBehavior: DuplicateAuraBehavior;
+  onUpdateDuplicateAuraBehavior: (behavior: DuplicateAuraBehavior) => Promise<void>;
   onClose: () => void;
 }
 
 type SortBy = 'obtained' | 'rarity' | 'name';
 type FilterRarity = 'all' | string;
 
-export default function Inventory({ auras, onClose }: InventoryProps) {
+export default function Inventory({ auras, duplicateAuraBehavior, onUpdateDuplicateAuraBehavior, onClose }: InventoryProps) {
   const [sortBy, setSortBy] = useState<SortBy>('rarity');
   const [filterRarity, setFilterRarity] = useState<FilterRarity>('all');
 
@@ -79,6 +81,18 @@ export default function Inventory({ auras, onClose }: InventoryProps) {
         </div>
 
         <div className="flex flex-wrap gap-3 px-4 py-2 border-b border-slate-600/80 bg-slate-800/50">
+          <label className="flex items-center gap-2 text-sm text-slate-400">
+            When you roll a duplicate:
+            <select
+              value={duplicateAuraBehavior}
+              onChange={(e) => onUpdateDuplicateAuraBehavior(e.target.value as DuplicateAuraBehavior)}
+              className="rounded bg-slate-700 border border-slate-600 text-white px-2 py-1 text-sm"
+            >
+              <option value="keep">Keep in inventory</option>
+              <option value="sacrifice">Sacrifice (more gold)</option>
+              <option value="auto">Let game decide</option>
+            </select>
+          </label>
           <label className="flex items-center gap-2 text-sm text-slate-400">
             Sort:
             <select

@@ -50,6 +50,19 @@ const RARITY_LUCK_RANK: Record<string, number> = {
   mythic: 5,
 };
 
+/** Extra gold when sacrificing a duplicate roll (rarity-based) */
+const SACRIFICE_GOLD_BY_RARITY: Record<string, number> = {
+  common: 2,
+  uncommon: 5,
+  rare: 15,
+  epic: 40,
+  legendary: 120,
+  mythic: 400,
+};
+function getSacrificeGold(rarity: string): number {
+  return GOLD_PER_ROLL + (SACRIFICE_GOLD_BY_RARITY[rarity] ?? SACRIFICE_GOLD_BY_RARITY.common);
+}
+
 /** Sol's RNG–style: luck multiplier boosts rarer auras more. weight_i = (1/chance_i) * (luckMult ** rarity_rank) */
 function performRoll(
   auras: { id: string; name: string; rarity: string; chance: number; visual_id: string; description: string }[],
@@ -106,7 +119,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     const authErr = requireAuth();
     if (authErr) return authErr.response;
     if (!user) return json({ error: 'Unauthorized' }, 401);
-    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at').eq('id', user.id).single();
+    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
     if (!profile) {
       const base = (user.user_metadata?.username as string) || user.email?.split('@')[0] || 'player';
       const username = base.slice(0, 18) + (user.id.slice(0, 2)); // ensure unique
@@ -119,7 +132,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         created_at: new Date().toISOString(),
       });
       if (insertErr) return json({ error: 'Profile not found' }, 404);
-      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null };
+      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
     }
     const now = Date.now();
     let rollSpeedPercent = (profile as { roll_speed_percent?: number }).roll_speed_percent ?? 0;
@@ -160,6 +173,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       };
     });
     const usernameChangedAt = (profile as { username_changed_at?: string | null }).username_changed_at ?? null;
+    const duplicateAuraBehavior = (profile as { duplicate_aura_behavior?: string }).duplicate_aura_behavior ?? 'keep';
     return json({
       id: profile.id,
       username: profile.username,
@@ -169,9 +183,28 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       usernameChangedAt,
       rollSpeedPercent,
       rollSpeedEndsAt,
+      duplicateAuraBehavior: duplicateAuraBehavior === 'sacrifice' || duplicateAuraBehavior === 'auto' ? duplicateAuraBehavior : 'keep',
       auras,
       potionInventory,
     });
+  }
+
+  // PATCH /api/user/duplicate-aura-behavior – body: { duplicateAuraBehavior: 'keep' | 'sacrifice' | 'auto' }
+  if (path === '/user/duplicate-aura-behavior' && method === 'PATCH') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    let body: { duplicateAuraBehavior?: string } = {};
+    try {
+      body = event.body ? JSON.parse(event.body) : {};
+    } catch {
+      return err('Invalid JSON');
+    }
+    const val = body.duplicateAuraBehavior;
+    if (val !== 'keep' && val !== 'sacrifice' && val !== 'auto') return err('duplicateAuraBehavior must be keep, sacrifice, or auto');
+    const { error: upErr } = await supabaseAdmin.from('profiles').update({ duplicate_aura_behavior: val }).eq('id', user.id);
+    if (upErr) return json({ error: 'Update failed' }, 500);
+    return json({ success: true, duplicateAuraBehavior: val });
   }
 
   // POST /api/user/use-potion – consume a roll-speed potion to activate buff (body: { potionId })
@@ -280,13 +313,20 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     const { data: auras } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
     const aura = performRoll(auras || [], luckMultiplier);
     if (!aura) return json({ error: 'No auras configured' }, 500);
-    const { data: u } = await supabaseAdmin.from('profiles').select('gold, username').eq('id', user.id).single();
+    const { data: u } = await supabaseAdmin.from('profiles').select('gold, username, duplicate_aura_behavior').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
-    const newGold = u.gold + GOLD_PER_ROLL;
-    await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
-    const { data: existing } = await supabaseAdmin.from('user_auras').select('user_id').eq('user_id', user.id).eq('aura_id', aura.id).maybeSingle();
+    const behavior = (u as { duplicate_aura_behavior?: string }).duplicate_aura_behavior ?? 'keep';
+    const { data: existingRows } = await supabaseAdmin.from('user_auras').select('id').eq('user_id', user.id).eq('aura_id', aura.id).limit(1);
+    const isDuplicate = existingRows && existingRows.length > 0;
+    const doKeep = !isDuplicate || behavior === 'keep' || (behavior === 'auto' && Math.random() < 0.5);
     const obtainedAt = new Date().toISOString();
-    if (!existing) {
+    let goldEarned = GOLD_PER_ROLL;
+    if (isDuplicate && !doKeep) {
+      goldEarned = getSacrificeGold(aura.rarity);
+    }
+    const newGold = u.gold + goldEarned;
+    await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
+    if (doKeep) {
       await supabaseAdmin.from('user_auras').insert({ user_id: user.id, aura_id: aura.id, obtained_at: obtainedAt });
     }
     if (ANNOUNCE_RARITIES.includes(aura.rarity)) {
@@ -299,7 +339,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         // Ignore if announcement insert fails (e.g. is_announcement column not migrated yet)
       }
     }
-    return json({ aura, newBalance: newGold, goldEarned: GOLD_PER_ROLL, firstTime: !existing });
+    return json({ aura, newBalance: newGold, goldEarned, firstTime: !isDuplicate, sacrificed: isDuplicate && !doKeep });
   }
 
   // POST /api/roll/batch (free; earn gold per roll). Body: { count?: number, usePotionId?: string } – one potion applies to all rolls
@@ -325,17 +365,23 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       await supabaseAdmin.from('user_potions').update({ quantity: up.quantity - 1 }).eq('user_id', user.id).eq('potion_id', body.usePotionId);
     }
     const { data: auras } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
-    const { data: u } = await supabaseAdmin.from('profiles').select('gold, username').eq('id', user.id).single();
+    const { data: u } = await supabaseAdmin.from('profiles').select('gold, username, duplicate_aura_behavior').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
+    const behavior = (u as { duplicate_aura_behavior?: string }).duplicate_aura_behavior ?? 'keep';
     const results: { id: string; name: string; rarity: string; chance: number; visualId: string; description: string }[] = [];
     let newGold = u.gold;
+    let totalGoldEarned = 0;
     for (let i = 0; i < count; i++) {
       const aura = performRoll(auras || [], luckMultiplier);
       if (aura) {
         results.push(aura);
-        newGold += GOLD_PER_ROLL;
-        const { data: ex } = await supabaseAdmin.from('user_auras').select('user_id').eq('user_id', user.id).eq('aura_id', aura.id).maybeSingle();
-        if (!ex) {
+        const { data: ex } = await supabaseAdmin.from('user_auras').select('id').eq('user_id', user.id).eq('aura_id', aura.id).limit(1);
+        const isDup = ex && ex.length > 0;
+        const doKeep = !isDup || behavior === 'keep' || (behavior === 'auto' && Math.random() < 0.5);
+        const goldThisRoll = doKeep ? GOLD_PER_ROLL : getSacrificeGold(aura.rarity);
+        newGold += goldThisRoll;
+        totalGoldEarned += goldThisRoll;
+        if (doKeep) {
           await supabaseAdmin.from('user_auras').insert({ user_id: user.id, aura_id: aura.id, obtained_at: new Date().toISOString() });
         }
         if (ANNOUNCE_RARITIES.includes(aura.rarity)) {
@@ -349,7 +395,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       }
     }
     await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
-    return json({ results, newBalance: newGold, goldEarned: GOLD_PER_ROLL * results.length });
+    return json({ results, newBalance: newGold, goldEarned: totalGoldEarned });
   }
 
   // POST /api/shop/buy-auto-roll

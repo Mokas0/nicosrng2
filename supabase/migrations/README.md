@@ -9,5 +9,6 @@ Run these in order (e.g. in Supabase Dashboard → SQL Editor, or via `supabase 
 | `20240314000003_potions.sql` | Potions catalog, user_potions inventory, RLS, seed luck potions |
 | `20240314000004_username_change.sql` | Adds `username_changed_at` to profiles (username change once per week) |
 | `20240314000005_roll_speed_and_special_shop.sql` | Roll speed buff (percent + ends_at), special shop (rare), roll-speed & special potions |
+| `20240314000006_duplicate_aura_behavior.sql` | user_auras.id PK (multiple copies), profiles.duplicate_aura_behavior (keep/sacrifice/auto) |
 
 After running all three, enable **Realtime** for `chat_messages` (Dashboard → Database → Replication).
