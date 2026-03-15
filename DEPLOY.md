@@ -18,8 +18,10 @@
 
 1. **Create a project** at [supabase.com](https://supabase.com).
 
-2. **Run migrations** (Supabase Dashboard → SQL Editor, or CLI):
-   - Run the SQL in `supabase/migrations/20240314000001_initial.sql`.
+2. **Run migrations** (Supabase Dashboard → SQL Editor, or CLI), in order:
+   - `supabase/migrations/20240314000001_initial.sql` – profiles, auras, user_auras, chat_messages, RLS, seed auras
+   - `supabase/migrations/20240314000002_chat_announcements.sql` – adds `is_announcement` to chat_messages (for legendary+ roll announcements)
+   - `supabase/migrations/20240314000003_potions.sql` – potions table, user_potions, RLS, seed luck potions
 
 3. **Enable Realtime** for chat:
    - Dashboard → Database → Replication → enable for table `chat_messages`.
@@ -48,5 +50,5 @@
 | Static site    | Netlify (from `client/dist`) |
 | Roll / Shop / Passive gold API | Netlify Functions (`netlify/functions/api.ts`) |
 | Auth (register / login) | Supabase Auth (client uses `@supabase/supabase-js`) |
-| Profile & game data | Supabase PostgreSQL (`profiles`, `auras`, `user_auras`) |
+| Profile & game data | Supabase PostgreSQL (`profiles`, `auras`, `user_auras`, `potions`, `user_potions`) |
 | Chat            | Supabase Realtime + `chat_messages` table |

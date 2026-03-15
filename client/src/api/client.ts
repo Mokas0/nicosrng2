@@ -30,6 +30,22 @@ export interface InventoryAura {
   description: string;
 }
 
+export interface PotionInventoryItem {
+  potionId: string;
+  quantity: number;
+  name: string;
+  luckPercent: number;
+  goldCost: number;
+}
+
+export interface PotionCatalogItem {
+  id: string;
+  name: string;
+  description: string;
+  luck_percent: number;
+  gold_cost: number;
+}
+
 export interface UserMe {
   id: string;
   username: string;
@@ -37,6 +53,7 @@ export interface UserMe {
   hasAutoRoll: boolean;
   hasQuickRoll: boolean;
   auras: InventoryAura[];
+  potionInventory?: PotionInventoryItem[];
 }
 
 export interface RollAura {
@@ -68,11 +85,15 @@ export const user = {
 };
 
 export const roll = {
-  single: () => api<RollResponse>('/roll', { method: 'POST' }),
-  batch: (count: number) =>
+  single: (usePotionId?: string) =>
+    api<RollResponse>('/roll', {
+      method: 'POST',
+      body: JSON.stringify(usePotionId != null ? { usePotionId } : {}),
+    }),
+  batch: (count: number, usePotionId?: string) =>
     api<{ results: RollAura[]; newBalance: number; goldEarned: number }>('/roll/batch', {
       method: 'POST',
-      body: JSON.stringify({ count }),
+      body: JSON.stringify(usePotionId != null ? { count, usePotionId } : { count }),
     }),
 };
 
@@ -81,4 +102,10 @@ export const shop = {
     api<{ success: boolean; newBalance: number; hasAutoRoll: boolean }>('/shop/buy-auto-roll', { method: 'POST' }),
   buyQuickRoll: () =>
     api<{ success: boolean; newBalance: number; hasQuickRoll: boolean }>('/shop/buy-quick-roll', { method: 'POST' }),
+  getPotions: () => api<PotionCatalogItem[]>('/potions'),
+  buyPotion: (potionId: string) =>
+    api<{ success: boolean; newBalance: number; potionId: string }>('/shop/buy-potion', {
+      method: 'POST',
+      body: JSON.stringify({ potionId }),
+    }),
 };

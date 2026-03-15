@@ -35,9 +35,26 @@ async function getUserFromToken(token: string | null, url: string, anon: string)
   }
 }
 
-function performRoll(auras: { id: string; name: string; rarity: string; chance: number; visual_id: string; description: string }[]) {
+const RARITY_LUCK_RANK: Record<string, number> = {
+  common: 0,
+  uncommon: 1,
+  rare: 2,
+  epic: 3,
+  legendary: 4,
+  mythic: 5,
+};
+
+/** Sol's RNG–style: luck multiplier boosts rarer auras more. weight_i = (1/chance_i) * (luckMult ** rarity_rank) */
+function performRoll(
+  auras: { id: string; name: string; rarity: string; chance: number; visual_id: string; description: string }[],
+  luckMultiplier = 1
+) {
   if (auras.length === 0) return null;
-  const weights = auras.map((a) => 1 / a.chance);
+  const weights = auras.map((a) => {
+    const rank = RARITY_LUCK_RANK[a.rarity] ?? 0;
+    const base = 1 / Math.max(a.chance, 1);
+    return base * Math.pow(luckMultiplier, rank);
+  });
   const total = weights.reduce((s, w) => s + w, 0);
   let r = Math.random() * total;
   for (let i = 0; i < auras.length; i++) {
@@ -113,6 +130,19 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         description: aura?.description ?? '',
       };
     });
+    const { data: up } = await supabaseAdmin.from('user_potions').select('potion_id, quantity').eq('user_id', user.id);
+    const { data: potionsCatalog } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost');
+    const potionsMap = new Map((potionsCatalog || []).map((p) => [p.id, p]));
+    const potionInventory = (up || []).map((r) => {
+      const p = potionsMap.get(r.potion_id);
+      return {
+        potionId: r.potion_id,
+        quantity: r.quantity,
+        name: p?.name ?? '',
+        luckPercent: p?.luck_percent ?? 0,
+        goldCost: p?.gold_cost ?? 0,
+      };
+    });
     return json({
       id: profile.id,
       username: profile.username,
@@ -120,7 +150,14 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
       hasAutoRoll: profile.has_auto_roll,
       hasQuickRoll: profile.has_quick_roll,
       auras,
+      potionInventory,
     });
+  }
+
+  // GET /api/potions – catalog for shop (no auth required)
+  if (path === '/potions' && method === 'GET') {
+    const { data: list } = await supabaseAdmin.from('potions').select('id, name, description, luck_percent, gold_cost').order('sort_order', { ascending: true });
+    return json(list ?? []);
   }
 
   // POST /api/user/passive-gold
@@ -140,13 +177,29 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     return json({ gold: newGold, granted: PASSIVE_GOLD_AMOUNT });
   }
 
-  // POST /api/roll – single roll (free; earn gold per roll)
+  // POST /api/roll – single roll (free; earn gold per roll). Body: { usePotionId?: string }
   if (path === '/roll' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
     if (!user) return json({ error: 'Unauthorized' }, 401);
+    let usePotionId: string | undefined;
+    try {
+      const body = event.body ? JSON.parse(event.body) as { usePotionId?: string } : {};
+      usePotionId = body.usePotionId;
+    } catch {
+      // no body or invalid JSON – no potion
+    }
+    let luckMultiplier = 1;
+    if (usePotionId) {
+      const { data: up } = await supabaseAdmin.from('user_potions').select('quantity').eq('user_id', user.id).eq('potion_id', usePotionId).single();
+      if (!up || up.quantity < 1) return err('No potion available', 400);
+      const { data: pot } = await supabaseAdmin.from('potions').select('luck_percent').eq('id', usePotionId).single();
+      if (!pot) return err('Invalid potion', 400);
+      luckMultiplier = 1 + pot.luck_percent / 100;
+      await supabaseAdmin.from('user_potions').update({ quantity: up.quantity - 1 }).eq('user_id', user.id).eq('potion_id', usePotionId);
+    }
     const { data: auras } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
-    const aura = performRoll(auras || []);
+    const aura = performRoll(auras || [], luckMultiplier);
     if (!aura) return json({ error: 'No auras configured' }, 500);
     const { data: u } = await supabaseAdmin.from('profiles').select('gold, username').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
@@ -170,12 +223,12 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     return json({ aura, newBalance: newGold, goldEarned: GOLD_PER_ROLL, firstTime: !existing });
   }
 
-  // POST /api/roll/batch (free; earn gold per roll)
+  // POST /api/roll/batch (free; earn gold per roll). Body: { count?: number, usePotionId?: string } – one potion applies to all rolls
   if (path === '/roll/batch' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
     if (!user) return json({ error: 'Unauthorized' }, 401);
-    let body: { count?: number } = {};
+    let body: { count?: number; usePotionId?: string } = {};
     try {
       body = event.body ? JSON.parse(event.body) : {};
     } catch {
@@ -183,13 +236,22 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     }
     const count = Math.min(Number(body.count) || 10, 10);
     if (count < 1) return err('Count must be 1–10');
+    let luckMultiplier = 1;
+    if (body.usePotionId) {
+      const { data: up } = await supabaseAdmin.from('user_potions').select('quantity').eq('user_id', user.id).eq('potion_id', body.usePotionId).single();
+      if (!up || up.quantity < 1) return err('No potion available', 400);
+      const { data: pot } = await supabaseAdmin.from('potions').select('luck_percent').eq('id', body.usePotionId).single();
+      if (!pot) return err('Invalid potion', 400);
+      luckMultiplier = 1 + pot.luck_percent / 100;
+      await supabaseAdmin.from('user_potions').update({ quantity: up.quantity - 1 }).eq('user_id', user.id).eq('potion_id', body.usePotionId);
+    }
     const { data: auras } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
     const { data: u } = await supabaseAdmin.from('profiles').select('gold, username').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
     const results: { id: string; name: string; rarity: string; chance: number; visualId: string; description: string }[] = [];
     let newGold = u.gold;
     for (let i = 0; i < count; i++) {
-      const aura = performRoll(auras || []);
+      const aura = performRoll(auras || [], luckMultiplier);
       if (aura) {
         results.push(aura);
         newGold += GOLD_PER_ROLL;
@@ -235,6 +297,35 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     if (u.gold < QUICK_ROLL_PRICE) return err('Not enough Gold', 400);
     await supabaseAdmin.from('profiles').update({ gold: u.gold - QUICK_ROLL_PRICE, has_quick_roll: true }).eq('id', user.id);
     return json({ success: true, newBalance: u.gold - QUICK_ROLL_PRICE, hasQuickRoll: true });
+  }
+
+  // POST /api/shop/buy-potion – body: { potionId: string }
+  if (path === '/shop/buy-potion' && method === 'POST') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    let body: { potionId?: string } = {};
+    try {
+      body = event.body ? JSON.parse(event.body) : {};
+    } catch {
+      return err('Invalid JSON');
+    }
+    const potionId = body.potionId;
+    if (!potionId || typeof potionId !== 'string') return err('potionId required', 400);
+    const { data: pot } = await supabaseAdmin.from('potions').select('id, gold_cost').eq('id', potionId).single();
+    if (!pot) return err('Potion not found', 404);
+    const { data: u } = await supabaseAdmin.from('profiles').select('gold').eq('id', user.id).single();
+    if (!u) return json({ error: 'Profile not found' }, 404);
+    if (u.gold < pot.gold_cost) return err('Not enough Gold', 400);
+    const newGold = u.gold - pot.gold_cost;
+    await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
+    const { data: existing } = await supabaseAdmin.from('user_potions').select('quantity').eq('user_id', user.id).eq('potion_id', potionId).maybeSingle();
+    if (existing) {
+      await supabaseAdmin.from('user_potions').update({ quantity: existing.quantity + 1 }).eq('user_id', user.id).eq('potion_id', potionId);
+    } else {
+      await supabaseAdmin.from('user_potions').insert({ user_id: user.id, potion_id: potionId, quantity: 1 });
+    }
+    return json({ success: true, newBalance: newGold, potionId });
   }
 
   // GET /api/health

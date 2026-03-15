@@ -6,11 +6,12 @@ import IntroCutscene from '../scenes/IntroCutscene';
 import ChatPanel from '../components/ChatPanel';
 import Shop from '../components/Shop';
 import Inventory from '../components/Inventory';
+import { AUTO_ROLL_INTERVAL_MS } from '../game/constants';
 
 const PASSIVE_GOLD_INTERVAL_MS = 30_000;
 
 export default function Dashboard() {
-  const { user, setGold } = useAuth();
+  const { user, setGold, refreshUser } = useAuth();
   const [rolling, setRolling] = useState(false);
   const [lastAura, setLastAura] = useState<RollAura | null>(null);
   const [showReveal, setShowReveal] = useState(false);
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [autoRollEnabled, setAutoRollEnabled] = useState(false);
   const [showIntro, setShowIntro] = useState(() => !sessionStorage.getItem('fame-intro-seen'));
   const [showInventory, setShowInventory] = useState(false);
+  const [usePotionId, setUsePotionId] = useState<string | ''>('');
   const autoRollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const passiveGoldTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -53,29 +55,36 @@ export default function Dashboard() {
       } catch {
         setRolling(false);
       }
-    }, 6000);
+    }, AUTO_ROLL_INTERVAL_MS);
     autoRollTimerRef.current = id;
     return () => {
       if (autoRollTimerRef.current) clearInterval(autoRollTimerRef.current);
     };
   }, [autoRollEnabled, user?.hasAutoRoll, rolling, setGold]);
 
+  const availablePotions = (user?.potionInventory ?? []).filter((p) => p.quantity > 0);
+
   async function handleRoll(quick: boolean) {
     if (rolling || !user) return;
+    const potionId = usePotionId || undefined;
     setRolling(true);
     setBatchResults(null);
     try {
       if (user.hasQuickRoll && quick) {
-        const res = await rollApi.batch(10);
+        const res = await rollApi.batch(10, potionId);
         setGold(res.newBalance);
         setBatchResults(res.results);
         setShowReveal(true);
         setLastAura(res.results[res.results.length - 1] ?? null);
       } else {
-        const res = await rollApi.single();
+        const res = await rollApi.single(potionId);
         setGold(res.newBalance);
         setLastAura(res.aura);
         setShowReveal(true);
+      }
+      if (potionId) {
+        setUsePotionId('');
+        refreshUser();
       }
     } catch (err) {
       console.error(err);
@@ -133,6 +142,23 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="bg-slate-800/60 rounded-2xl border border-slate-600 p-8 max-w-md w-full text-center">
             <p className="text-slate-400 mb-4">Rolls are free. You earn 5 Gold per roll.</p>
+            {availablePotions.length > 0 && (
+              <label className="block mb-3 text-left">
+                <span className="text-slate-400 text-sm">Use potion (one roll):</span>
+                <select
+                  value={usePotionId}
+                  onChange={(e) => setUsePotionId(e.target.value)}
+                  className="mt-1 w-full rounded-lg bg-slate-700 border border-slate-600 text-white px-3 py-2 text-sm"
+                >
+                  <option value="">None</option>
+                  {availablePotions.map((p) => (
+                    <option key={p.potionId} value={p.potionId}>
+                      {p.name} (+{p.luckPercent.toLocaleString()}%) ×{p.quantity}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               onClick={() => handleRoll(false)}
               disabled={!canRoll}
@@ -157,7 +183,7 @@ export default function Dashboard() {
                 disabled={!canRoll}
                 className="w-full mt-3 py-3 rounded-xl bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white font-semibold transition"
               >
-                Quick Roll (10x)
+                Quick Roll (10x){usePotionId ? ' + potion' : ''}
               </button>
             )}
             {lastAura && !showReveal && (
