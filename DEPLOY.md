@@ -25,6 +25,7 @@
    - Dashboard → Database → Replication → enable for table `chat_messages`.
 
 4. **Auth**: Sign up uses **email**, **username** (display name), and **password**. Login uses **email** and **password**.
+   - **Resetting / wiping data**: Deleting rows from `profiles` (or truncating tables) does **not** remove the user from Supabase Auth. To let the same email register again, delete the user in **Authentication → Users** in the Supabase dashboard. Otherwise they’ll see “already registered” and should use **Sign in** instead (the API will create a new profile on first login if missing).
    - In Authentication → Providers → Email: turn **off** “Confirm email” if you want immediate sign-in without verifying the email.
    - **“Email rate limit exceeded”**: Supabase limits how many auth emails (sign-up, reset) are sent. To avoid this in dev: turn **off** “Confirm email” (no sign-up email sent). For production you can use custom SMTP (Settings → Auth → SMTP) or wait for the rate limit to reset.
 

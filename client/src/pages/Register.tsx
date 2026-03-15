@@ -40,7 +40,14 @@ export default function Register() {
         password,
         options: { data: { username: trimmedUsername } },
       });
-      if (err) throw err;
+      if (err) {
+        const msg = err.message?.toLowerCase() ?? '';
+        if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('already been registered')) {
+          setError('This email is already registered. Sign in instead, or use a different email.');
+          return;
+        }
+        throw err;
+      }
       if (!data.user) {
         setError('Registration failed');
         return;
@@ -64,7 +71,12 @@ export default function Register() {
         setError('Check your email to confirm your account, then sign in.');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('already exists')) {
+        setError('This email is already registered. Sign in instead.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
