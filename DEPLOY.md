@@ -7,12 +7,12 @@
    - Publish directory: `client/dist`
    - Functions: `netlify/functions`
 
-2. **Environment variables** (Netlify → Site settings → Environment variables):
-   - `VITE_SUPABASE_URL` – Supabase project URL (used by client and functions)
-   - `VITE_SUPABASE_ANON_KEY` – Supabase anon key (used by client and functions)
-   - `SUPABASE_SERVICE_ROLE_KEY` – Supabase service role key (used only by serverless functions; keep secret)
+2. **Environment variables** (Netlify → Site configuration → Environment variables):
+   - `VITE_SUPABASE_URL` – Supabase project URL
+   - `VITE_SUPABASE_ANON_KEY` – Supabase anon key
+   - `SUPABASE_SERVICE_ROLE_KEY` – Supabase service role key (secret; only the serverless function uses it)
 
-   The client needs `VITE_*` so they are baked into the build. The Netlify function reads the same env (Netlify injects them at runtime).
+   Add all three with whatever scope your plan allows (e.g. “All”). On the **free tier** you can’t limit variables to “Functions” only—that’s fine. The service role key is never used in client code, so it won’t be included in the frontend build; only the function reads it at runtime.
 
 ## Supabase (auth, database, realtime)
 

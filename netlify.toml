@@ -1,10 +1,16 @@
 [build]
-  command = "cd client && npm ci && npm run build"
+  # Install root deps first (needed for Netlify functions), then build client
+  command = "npm install && cd client && npm ci && npm run build"
   publish = "client/dist"
   functions = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "20"
+
+[functions]
+  node_bundler = "esbuild"
+  # Max 26s on free tier; avoids timeout 502s
+  timeout = 26
 
 # API: proxy to serverless function (must come before SPA redirect)
 [[redirects]]

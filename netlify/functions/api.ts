@@ -1,9 +1,12 @@
 import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
 import { createClient, type User } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL!;
-const SUPABASE_ANON = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY!;
-const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+function getEnv() {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anon = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return { url, anon, serviceRole };
+}
 
 const ROLL_COST = 10;
 const GOLD_PER_ROLL = 3;
@@ -20,12 +23,16 @@ function err(message: string, status = 400) {
   return json({ error: message }, status);
 }
 
-async function getUserFromToken(token: string | null): Promise<User | null> {
-  if (!token?.startsWith('Bearer ')) return null;
-  const accessToken = token.slice(7);
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
-  const { data: { user } } = await supabase.auth.getUser(accessToken);
-  return user;
+async function getUserFromToken(token: string | null, url: string, anon: string): Promise<User | null> {
+  if (!token?.startsWith('Bearer ') || !url || !anon) return null;
+  try {
+    const accessToken = token.slice(7);
+    const supabase = createClient(url, anon);
+    const { data: { user } } = await supabase.auth.getUser(accessToken);
+    return user;
+  } catch {
+    return null;
+  }
 }
 
 function performRoll(auras: { id: string; name: string; rarity: string; chance: number; visual_id: string; description: string }[]) {
@@ -45,17 +52,27 @@ function performRoll(auras: { id: string; name: string; rarity: string; chance: 
 }
 
 export const handler: Handler = async (event: HandlerEvent, _context: HandlerContext) => {
-  const rawPath = (event.headers['x-netlify-original-pathname'] as string) || event.path || '';
-  const path = rawPath.replace(/^\/api/, '') || '/';
-  const method = event.httpMethod;
-  const token = event.headers.authorization || event.headers.Authorization;
-  const user = await getUserFromToken(typeof token === 'string' ? token : token?.[0]);
-  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
+  try {
+    const { url: SUPABASE_URL, anon: SUPABASE_ANON, serviceRole: SUPABASE_SERVICE_ROLE } = getEnv();
 
-  const requireAuth = () => {
-    if (!user) return { response: err('Unauthorized', 401) };
-    return null;
-  };
+    if (!SUPABASE_URL || !SUPABASE_ANON || !SUPABASE_SERVICE_ROLE) {
+      return json(
+        { error: 'Server misconfigured: missing Supabase env (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY).' },
+        503
+      );
+    }
+
+    const rawPath = (event.headers['x-netlify-original-pathname'] as string) || event.path || '';
+    const path = rawPath.replace(/^\/api/, '').replace(/^\.netlify\/functions\/api/, '') || '/';
+    const method = event.httpMethod;
+    const token = event.headers.authorization || event.headers.Authorization;
+    const user = await getUserFromToken(typeof token === 'string' ? token : token?.[0], SUPABASE_URL, SUPABASE_ANON);
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
+
+    const requireAuth = () => {
+      if (!user) return { response: err('Unauthorized', 401) };
+      return null;
+    };
 
   // POST /api/auth/register – handled by Supabase Auth on client
   // POST /api/auth/login – handled by Supabase Auth on client
@@ -189,4 +206,8 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   }
 
   return json({ error: 'Not found' }, 404);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Internal server error';
+    return json({ error: message }, 500);
+  }
 };
