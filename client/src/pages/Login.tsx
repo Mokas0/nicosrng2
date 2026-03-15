@@ -63,6 +63,9 @@ export default function Login() {
       } catch (err) {
         clearTimeout(timeoutId);
         const msg = getErrorMessage(err);
+        // #region agent log
+        fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'client/src/pages/Login.tsx',message:'Login catch',data:{msg,raw:err instanceof Error ? err.message : String(err)},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
+        // #endregion
         if (msg === 'Profile not found' || msg.includes('profile')) {
           setError('Account not set up. Please register first.');
         } else if (

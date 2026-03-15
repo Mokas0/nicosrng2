@@ -117,12 +117,21 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   // GET /api/user/me – get profile; create one if missing (e.g. email confirmation signup)
   if (path === '/user/me' && method === 'GET') {
     const authErr = requireAuth();
-    if (authErr) return authErr.response;
+    if (authErr) {
+      // #region agent log
+      fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'netlify/functions/api.ts',message:'/user/me requireAuth failed',data:{hasUser:!!user},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
+      return authErr.response;
+    }
     if (!user) return json({ error: 'Unauthorized' }, 401);
     let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
+    // #region agent log
+    fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'netlify/functions/api.ts',message:'/user/me profile lookup',data:{userId:user.id,profileFound:!!profile},timestamp:Date.now(),hypothesisId:'H3-H5'})}).catch(()=>{});
+    // #endregion
     if (!profile) {
       const base = (user.user_metadata?.username as string) || user.email?.split('@')[0] || 'player';
-      const username = base.slice(0, 18) + (user.id.slice(0, 2)); // ensure unique
+      const uniqueSuffix = user.id.replace(/-/g, '').slice(0, 8);
+      const username = `${base.slice(0, 12)}-${uniqueSuffix}`;
       const { error: insertErr } = await supabaseAdmin.from('profiles').insert({
         id: user.id,
         username,
@@ -131,8 +140,33 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         has_quick_roll: false,
         created_at: new Date().toISOString(),
       });
-      if (insertErr) return json({ error: 'Profile not found' }, 404);
-      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
+      if (insertErr) {
+        // #region agent log
+        fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'netlify/functions/api.ts',message:'/user/me profile insert failed',data:{userId:user.id,username,code:insertErr.code,message:insertErr.message},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
+        if (insertErr.code === '23505') {
+          const { data: existing } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
+          if (existing) {
+            profile = existing;
+          } else {
+            const retryUsername = `${base.slice(0, 8)}-${uniqueSuffix}-${Date.now().toString(36)}`;
+            const { error: retryErr } = await supabaseAdmin.from('profiles').insert({
+              id: user.id,
+              username: retryUsername,
+              gold: 100,
+              has_auto_roll: false,
+              has_quick_roll: false,
+              created_at: new Date().toISOString(),
+            });
+            if (retryErr) return json({ error: 'Profile not found' }, 404);
+            profile = { id: user.id, username: retryUsername, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
+          }
+        } else {
+          return json({ error: 'Profile not found' }, 404);
+        }
+      } else {
+        profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
+      }
     }
     const now = Date.now();
     let rollSpeedPercent = (profile as { roll_speed_percent?: number }).roll_speed_percent ?? 0;

@@ -16,7 +16,13 @@ export async function api<T>(
   if (token) (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${API}${path}`, { ...options, headers, credentials: 'include' });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error || res.statusText);
+  if (!res.ok) {
+    const errMsg = (data as { error?: string }).error || res.statusText;
+    // #region agent log
+    fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'client/src/api/client.ts',message:'API error response',data:{path,status:res.status,error:errMsg},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
+    // #endregion
+    throw new Error(errMsg);
+  }
   return data as T;
 }
 
