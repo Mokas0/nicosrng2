@@ -18,8 +18,9 @@ export async function api<T>(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const errMsg = (data as { error?: string }).error || res.statusText;
+    const body = data as { error?: string; insertErrorCode?: string; insertErrorMessage?: string };
     // #region agent log
-    fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'client/src/api/client.ts',message:'API error response',data:{path,status:res.status,error:errMsg},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7354/ingest/ab722707-ed6a-4616-87e2-df03126dbe77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'246d6e'},body:JSON.stringify({sessionId:'246d6e',location:'client/src/api/client.ts',message:'API error response',data:{path,status:res.status,error:errMsg,insertErrorCode:body.insertErrorCode,insertErrorMessage:body.insertErrorMessage},timestamp:Date.now(),hypothesisId:'H1-H5'})}).catch(()=>{});
     // #endregion
     throw new Error(errMsg);
   }

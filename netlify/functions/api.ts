@@ -158,11 +158,18 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
               has_quick_roll: false,
               created_at: new Date().toISOString(),
             });
-            if (retryErr) return json({ error: 'Profile not found' }, 404);
-            profile = { id: user.id, username: retryUsername, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
+            if (retryErr) {
+              if (retryErr.code === '23505') {
+                const { data: existing2 } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at, roll_speed_percent, roll_speed_ends_at, special_shop_ends_at, special_shop_last_roll_at, duplicate_aura_behavior').eq('id', user.id).single();
+                if (existing2) profile = existing2;
+              }
+              if (!profile) return json({ error: 'Profile not found', insertErrorCode: retryErr.code, insertErrorMessage: retryErr.message }, 404);
+            } else {
+              profile = { id: user.id, username: retryUsername, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
+            }
           }
         } else {
-          return json({ error: 'Profile not found' }, 404);
+          return json({ error: 'Profile not found', insertErrorCode: insertErr.code, insertErrorMessage: insertErr.message }, 404);
         }
       } else {
         profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null, roll_speed_percent: 0, roll_speed_ends_at: null, special_shop_ends_at: null, special_shop_last_roll_at: null, duplicate_aura_behavior: 'keep' };
