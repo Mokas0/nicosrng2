@@ -8,8 +8,8 @@ function getEnv() {
   return { url, anon, serviceRole };
 }
 
-const ROLL_COST = 10;
-const GOLD_PER_ROLL = 3;
+const GOLD_PER_ROLL = 5;
+const ANNOUNCE_RARITIES = ['epic', 'legendary', 'mythic'];
 const AUTO_ROLL_PRICE = 5000;
 const QUICK_ROLL_PRICE = 2500;
 const PASSIVE_GOLD_INTERVAL_MS = 30_000;
@@ -65,8 +65,9 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     const rawPath = (event.headers['x-netlify-original-pathname'] as string) || event.path || '';
     const path = rawPath.replace(/^\/api/, '').replace(/^\.netlify\/functions\/api/, '') || '/';
     const method = event.httpMethod;
-    const token = event.headers.authorization || event.headers.Authorization;
-    const user = await getUserFromToken(typeof token === 'string' ? token : token?.[0], SUPABASE_URL, SUPABASE_ANON);
+    const tokenRaw = event.headers.authorization || event.headers.Authorization;
+    const token = tokenRaw == null ? null : typeof tokenRaw === 'string' ? tokenRaw : tokenRaw[0] ?? null;
+    const user = await getUserFromToken(token, SUPABASE_URL, SUPABASE_ANON);
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE);
 
     const requireAuth = () => {
@@ -81,6 +82,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   if (path === '/user/me' && method === 'GET') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
     let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll').eq('id', user.id).single();
     if (!profile) {
       const base = (user.user_metadata?.username as string) || user.email?.split('@')[0] || 'player';
@@ -111,6 +113,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   if (path === '/user/passive-gold' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
     const { data: u } = await supabaseAdmin.from('profiles').select('gold, last_passive_gold_at').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
     const now = Date.now();
@@ -123,29 +126,41 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     return json({ gold: newGold, granted: PASSIVE_GOLD_AMOUNT });
   }
 
-  // POST /api/roll – single roll
+  // POST /api/roll – single roll (free; earn gold per roll)
   if (path === '/roll' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
     const { data: auras } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
     const aura = performRoll(auras || []);
     if (!aura) return json({ error: 'No auras configured' }, 500);
-    const { data: u } = await supabaseAdmin.from('profiles').select('gold').eq('id', user.id).single();
-    if (!u || u.gold < ROLL_COST) return err('Not enough Gold', 400);
-    const newGold = u.gold - ROLL_COST + GOLD_PER_ROLL;
+    const { data: u } = await supabaseAdmin.from('profiles').select('gold, username').eq('id', user.id).single();
+    if (!u) return json({ error: 'Profile not found' }, 404);
+    const newGold = u.gold + GOLD_PER_ROLL;
     await supabaseAdmin.from('profiles').update({ gold: newGold }).eq('id', user.id);
     const { data: existing } = await supabaseAdmin.from('user_auras').select('user_id').eq('user_id', user.id).eq('aura_id', aura.id).maybeSingle();
     const obtainedAt = new Date().toISOString();
     if (!existing) {
       await supabaseAdmin.from('user_auras').insert({ user_id: user.id, aura_id: aura.id, obtained_at: obtainedAt });
     }
+    if (ANNOUNCE_RARITIES.includes(aura.rarity)) {
+      const { error: announceErr } = await supabaseAdmin.from('chat_messages').insert({
+        username: '★',
+        text: `${u.username || 'Someone'} rolled [${aura.rarity}] ${aura.name}!`,
+        is_announcement: true,
+      });
+      if (announceErr) {
+        // Ignore if announcement insert fails (e.g. is_announcement column not migrated yet)
+      }
+    }
     return json({ aura, newBalance: newGold, goldEarned: GOLD_PER_ROLL, firstTime: !existing });
   }
 
-  // POST /api/roll/batch
+  // POST /api/roll/batch (free; earn gold per roll)
   if (path === '/roll/batch' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
     let body: { count?: number } = {};
     try {
       body = event.body ? JSON.parse(event.body) : {};
@@ -155,12 +170,10 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     const count = Math.min(Number(body.count) || 10, 10);
     if (count < 1) return err('Count must be 1–10');
     const { data: auras } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
-    const { data: u } = await supabaseAdmin.from('profiles').select('gold').eq('id', user.id).single();
+    const { data: u } = await supabaseAdmin.from('profiles').select('gold, username').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
-    const totalCost = ROLL_COST * count;
-    if (u.gold < totalCost) return err('Not enough Gold', 400);
     const results: { id: string; name: string; rarity: string; chance: number; visualId: string; description: string }[] = [];
-    let newGold = u.gold - totalCost;
+    let newGold = u.gold;
     for (let i = 0; i < count; i++) {
       const aura = performRoll(auras || []);
       if (aura) {
@@ -169,6 +182,14 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         const { data: ex } = await supabaseAdmin.from('user_auras').select('user_id').eq('user_id', user.id).eq('aura_id', aura.id).maybeSingle();
         if (!ex) {
           await supabaseAdmin.from('user_auras').insert({ user_id: user.id, aura_id: aura.id, obtained_at: new Date().toISOString() });
+        }
+        if (ANNOUNCE_RARITIES.includes(aura.rarity)) {
+          await supabaseAdmin.from('chat_messages').insert({
+            username: '★',
+            text: `${u.username || 'Someone'} rolled [${aura.rarity}] ${aura.name}!`,
+            is_announcement: true,
+          });
+          // Ignore insert error (e.g. is_announcement column not migrated yet)
         }
       }
     }
@@ -180,6 +201,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   if (path === '/shop/buy-auto-roll' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
     const { data: u } = await supabaseAdmin.from('profiles').select('gold, has_auto_roll').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
     if (u.has_auto_roll) return err('Already owned');
@@ -192,6 +214,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   if (path === '/shop/buy-quick-roll' && method === 'POST') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
     const { data: u } = await supabaseAdmin.from('profiles').select('gold, has_quick_roll').eq('id', user.id).single();
     if (!u) return json({ error: 'Profile not found' }, 404);
     if (u.has_quick_roll) return err('Already owned');

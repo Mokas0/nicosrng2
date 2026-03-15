@@ -6,7 +6,6 @@ import IntroCutscene from '../scenes/IntroCutscene';
 import ChatPanel from '../components/ChatPanel';
 import Shop from '../components/Shop';
 
-const ROLL_COST = 10;
 const PASSIVE_GOLD_INTERVAL_MS = 30_000;
 
 export default function Dashboard() {
@@ -41,9 +40,8 @@ export default function Dashboard() {
   }, [setGold]);
 
   useEffect(() => {
-    if (!autoRollEnabled || !user?.hasAutoRoll || user.gold < ROLL_COST || rolling) return;
+    if (!autoRollEnabled || !user?.hasAutoRoll || rolling) return;
     const id = setInterval(async () => {
-      if (user.gold < ROLL_COST) return;
       setRolling(true);
       try {
         const res = await rollApi.single();
@@ -58,10 +56,10 @@ export default function Dashboard() {
     return () => {
       if (autoRollTimerRef.current) clearInterval(autoRollTimerRef.current);
     };
-  }, [autoRollEnabled, user?.hasAutoRoll, user?.gold, rolling, setGold]);
+  }, [autoRollEnabled, user?.hasAutoRoll, rolling, setGold]);
 
   async function handleRoll(quick: boolean) {
-    if (rolling || !user || user.gold < ROLL_COST) return;
+    if (rolling || !user) return;
     setRolling(true);
     setBatchResults(null);
     try {
@@ -91,7 +89,7 @@ export default function Dashboard() {
     setRolling(false);
   }
 
-  const canRoll = user && user.gold >= ROLL_COST && !rolling;
+  const canRoll = user && !rolling;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-900">
@@ -125,7 +123,7 @@ export default function Dashboard() {
       <main className="flex-1 flex flex-col md:flex-row p-4 gap-4">
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="bg-slate-800/60 rounded-2xl border border-slate-600 p-8 max-w-md w-full text-center">
-            <p className="text-slate-400 mb-4">Each roll costs {ROLL_COST} Gold. You earn 3 Gold per roll.</p>
+            <p className="text-slate-400 mb-4">Rolls are free. You earn 5 Gold per roll.</p>
             <button
               onClick={() => handleRoll(false)}
               disabled={!canRoll}
@@ -147,10 +145,10 @@ export default function Dashboard() {
             {user?.hasQuickRoll && (
               <button
                 onClick={() => handleRoll(true)}
-                disabled={!canRoll || user.gold < ROLL_COST * 10}
+                disabled={!canRoll}
                 className="w-full mt-3 py-3 rounded-xl bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white font-semibold transition"
               >
-                Quick Roll (10x) — {ROLL_COST * 10} Gold
+                Quick Roll (10x)
               </button>
             )}
             {lastAura && !showReveal && (

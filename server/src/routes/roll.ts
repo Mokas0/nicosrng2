@@ -8,8 +8,7 @@ import { performRoll, type RollResult } from '../services/rollEngine.js';
 const router = Router();
 router.use(authMiddleware);
 
-const ROLL_COST = 10;
-const GOLD_PER_ROLL = 3;
+const GOLD_PER_ROLL = 5;
 
 router.post('/', async (req, res) => {
   const { user } = req as Request & { user: { userId: string } };
@@ -18,16 +17,12 @@ router.post('/', async (req, res) => {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-  if (u.gold < ROLL_COST) {
-    res.status(400).json({ error: 'Not enough Gold', required: ROLL_COST, gold: u.gold });
-    return;
-  }
   const aura = performRoll();
   if (!aura) {
     res.status(500).json({ error: 'No auras configured' });
     return;
   }
-  const newGold = u.gold - ROLL_COST + GOLD_PER_ROLL;
+  const newGold = u.gold + GOLD_PER_ROLL;
   await db.update(users).set({ gold: newGold }).where(eq(users.id, user.userId)).run();
   const existing = await db.select().from(userAuras).where(and(eq(userAuras.userId, user.userId), eq(userAuras.auraId, aura.id))).get();
   const obtainedAt = new Date().toISOString();
@@ -54,13 +49,8 @@ router.post('/batch', async (req, res) => {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-  const totalCost = ROLL_COST * count;
-  if (u.gold < totalCost) {
-    res.status(400).json({ error: 'Not enough Gold', required: totalCost, gold: u.gold });
-    return;
-  }
   const results: RollResult[] = [];
-  let newGold = u.gold - totalCost;
+  let newGold = u.gold;
   for (let i = 0; i < count; i++) {
     const aura = performRoll();
     if (aura) {
