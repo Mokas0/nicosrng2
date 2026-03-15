@@ -28,13 +28,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setState({ user: null, loading: false, error: null });
       return;
     }
-    try {
-      const me = await user.me();
-      setState((s) => ({ ...s, user: me, loading: false, error: null }));
-    } catch {
-      localStorage.removeItem('token');
-      setState({ user: null, loading: false, error: null });
-    }
+    const me = await user.me();
+    setState((s) => ({ ...s, user: me, loading: false, error: null }));
   }, []);
 
   useEffect(() => {
@@ -42,7 +37,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
         localStorage.setItem('token', session.access_token);
-        await refreshUser();
+        try {
+          await refreshUser();
+        } catch {
+          localStorage.removeItem('token');
+          setState({ user: null, loading: false, error: null });
+        }
       } else {
         setState({ user: null, loading: false, error: null });
       }
@@ -54,7 +54,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token) {
         localStorage.setItem('token', session.access_token);
-        refreshUser();
+        refreshUser().catch(() => {
+          localStorage.removeItem('token');
+          setState({ user: null, loading: false, error: null });
+        });
       } else {
         localStorage.removeItem('token');
         setState({ user: null, loading: false, error: null });
@@ -65,7 +68,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (token: string) => {
     localStorage.setItem('token', token);
-    await refreshUser();
+    try {
+      await refreshUser();
+    } catch (e) {
+      localStorage.removeItem('token');
+      setState((s) => ({ ...s, user: null, loading: false }));
+      throw e;
+    }
   }, [refreshUser]);
 
   const logout = useCallback(async () => {

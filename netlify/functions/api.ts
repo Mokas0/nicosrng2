@@ -60,12 +60,25 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
   // POST /api/auth/register – handled by Supabase Auth on client
   // POST /api/auth/login – handled by Supabase Auth on client
 
-  // GET /api/user/me – get profile (client can also use Supabase directly; this is for compatibility)
+  // GET /api/user/me – get profile; create one if missing (e.g. email confirmation signup)
   if (path === '/user/me' && method === 'GET') {
     const authErr = requireAuth();
     if (authErr) return authErr.response;
-    const { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll').eq('id', user.id).single();
-    if (!profile) return json({ error: 'Profile not found' }, 404);
+    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll').eq('id', user.id).single();
+    if (!profile) {
+      const base = (user.user_metadata?.username as string) || user.email?.split('@')[0] || 'player';
+      const username = base.slice(0, 18) + (user.id.slice(0, 2)); // ensure unique
+      const { error: insertErr } = await supabaseAdmin.from('profiles').insert({
+        id: user.id,
+        username,
+        gold: 100,
+        has_auto_roll: false,
+        has_quick_roll: false,
+        created_at: new Date().toISOString(),
+      });
+      if (insertErr) return json({ error: 'Profile not found' }, 404);
+      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false };
+    }
     const { data: inv } = await supabaseAdmin.from('user_auras').select('aura_id, obtained_at').eq('user_id', user.id);
     return json({
       id: profile.id,

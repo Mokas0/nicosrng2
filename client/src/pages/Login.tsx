@@ -28,7 +28,14 @@ export default function Login() {
         setError('Login failed');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      if (msg === 'Profile not found' || msg.includes('profile')) {
+        setError('Account not set up. Please register first.');
+      } else if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
+        setError('Cannot reach server. Check your connection or try again later.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
