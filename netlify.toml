@@ -2,22 +2,12 @@
   command = "npm install && cd client && npm ci && npm run build"
   publish = "client/dist"
 
-[build.environment]
-  NODE_VERSION = "20"
-
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-  timeout = 26
-
-# API: proxy to serverless function (must come before SPA redirect)
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api"
   status = 200
   force = true
 
-# SPA: serve index.html for all other routes
 [[redirects]]
   from = "/*"
   to = "/index.html"
