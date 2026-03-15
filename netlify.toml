@@ -1,0 +1,20 @@
+[build]
+  command = "cd client && npm ci && npm run build"
+  publish = "client/dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# API: proxy to serverless function (must come before SPA redirect)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+
+# SPA: serve index.html for all other routes
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

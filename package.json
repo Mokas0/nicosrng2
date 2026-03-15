@@ -1,0 +1,20 @@
+{
+  "name": "fame-and-fortune",
+  "private": true,
+  "description": "Fame and Fortune – Netlify (frontend + functions) + Supabase (auth, db, realtime)",
+  "scripts": {
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build": "cd client && npm ci && npm run build",
+    "postinstall": "cd client && npm install"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^2.8.0",
+    "@types/node": "^20.10.0",
+    "netlify-cli": "^17.0.0",
+    "typescript": "^5.3.3"
+  }
+}

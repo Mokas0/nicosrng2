@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-common: #9ca3af;
+  --color-uncommon: #22c55e;
+  --color-rare: #3b82f6;
+  --color-epic: #a855f7;
+  --color-legendary: #f97316;
+  --color-mythic: #eab308;
+}
+
+body {
+  margin: 0;
+  font-family: 'Source Sans 3', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  min-height: 100vh;
+  color: #e2e8f0;
+}
+
+.font-display {
+  font-family: 'Cinzel', serif;
+}
