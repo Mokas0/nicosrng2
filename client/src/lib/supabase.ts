@@ -8,7 +8,3 @@ if (!url || !anonKey) {
 }
 
 export const supabase = createClient(url || 'https://placeholder.supabase.co', anonKey || 'placeholder');
-
-/** Map username to internal email for Supabase Auth (email-only). */
-export const usernameToEmail = (username: string) => `${username.trim().toLowerCase()}@famefortune.game`;
-export const emailToUsername = (email: string) => email.replace(/@famefortune\.game$/i, '');

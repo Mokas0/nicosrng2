@@ -41,7 +41,10 @@ alter table public.auras enable row level security;
 alter table public.user_auras enable row level security;
 alter table public.chat_messages enable row level security;
 
--- Profiles: users can read/update own row; insert own on signup
+-- Policies (drop if exists so migration is re-runnable)
+drop policy if exists "Users can read own profile" on public.profiles;
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Users can insert own profile" on public.profiles;
 create policy "Users can read own profile" on public.profiles
   for select using (auth.uid() = id);
 create policy "Users can update own profile" on public.profiles
@@ -49,15 +52,16 @@ create policy "Users can update own profile" on public.profiles
 create policy "Users can insert own profile" on public.profiles
   for insert with check (auth.uid() = id);
 
--- Auras: everyone can read
+drop policy if exists "Anyone can read auras" on public.auras;
 create policy "Anyone can read auras" on public.auras
   for select using (true);
 
--- User auras: users can read own inventory (insert/update via Netlify function with service role)
+drop policy if exists "Users can read own user_auras" on public.user_auras;
 create policy "Users can read own user_auras" on public.user_auras
   for select using (auth.uid() = user_id);
 
--- Chat: authenticated can insert; everyone can read (for realtime)
+drop policy if exists "Authenticated can insert chat" on public.chat_messages;
+drop policy if exists "Anyone can read chat" on public.chat_messages;
 create policy "Authenticated can insert chat" on public.chat_messages
   for insert with check (auth.uid() is not null);
 create policy "Anyone can read chat" on public.chat_messages
@@ -77,5 +81,10 @@ insert into public.auras (id, name, rarity, chance, visual_id, description) valu
   ('aura-10', 'Chrono Shift', 'epic', 5000, 'epic-1', 'An epic aura: Chrono Shift.')
 on conflict (id) do nothing;
 
--- Realtime: add chat_messages to publication so clients can subscribe
-alter publication supabase_realtime add table public.chat_messages;
+-- Realtime: add chat_messages to publication (idempotent)
+do $$
+begin
+  alter publication supabase_realtime add table public.chat_messages;
+exception
+  when duplicate_object then null;
+end $$;

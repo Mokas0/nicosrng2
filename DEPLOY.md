@@ -24,8 +24,8 @@
 3. **Enable Realtime** for chat:
    - Dashboard → Database → Replication → enable for table `chat_messages`.
 
-4. **Auth** (optional for username-only login):
-   - In Authentication → Providers → Email: turn **off** “Confirm email” if you want immediate sign-in without email verification (we use internal emails like `user@famefortune.game`).
+4. **Auth**: Sign up uses **email**, **username** (display name), and **password**. Login uses **email** and **password**.
+   - In Authentication → Providers → Email: turn **off** “Confirm email” if you want immediate sign-in without verifying the email.
 
 5. **Seed auras** (optional): the migration inserts 3 sample auras. To seed the full set, run the server once with Supabase config, or run the seed script from the server (see server README), or paste the generated seed SQL into the SQL Editor.
 

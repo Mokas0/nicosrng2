@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
-import { supabase, usernameToEmail } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,7 +17,7 @@ export default function Login() {
     setLoading(true);
     try {
       const { data, error: err } = await supabase.auth.signInWithPassword({
-        email: usernameToEmail(username.trim()),
+        email: email.trim().toLowerCase(),
         password,
       });
       if (err) throw err;
@@ -41,12 +41,13 @@ export default function Login() {
         <p className="text-slate-400 text-center text-sm mb-6">Sign in to continue</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             className="w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             required
+            autoComplete="email"
           />
           <input
             type="password"
@@ -55,6 +56,7 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
             className="w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             required
+            autoComplete="current-password"
           />
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button

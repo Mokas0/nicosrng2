@@ -1,9 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/AuthContext';
-import { supabase, usernameToEmail } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
 
 export default function Register() {
+  const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -16,8 +21,13 @@ export default function Register() {
     setError('');
     setLoading(true);
     try {
-      const trimmed = username.trim();
-      if (trimmed.length < 2 || trimmed.length > 20) {
+      const trimmedEmail = email.trim().toLowerCase();
+      const trimmedUsername = username.trim();
+      if (!isValidEmail(trimmedEmail)) {
+        setError('Please enter a valid email address.');
+        return;
+      }
+      if (trimmedUsername.length < 2 || trimmedUsername.length > 20) {
         setError('Username must be 2–20 characters');
         return;
       }
@@ -26,9 +36,9 @@ export default function Register() {
         return;
       }
       const { data, error: err } = await supabase.auth.signUp({
-        email: usernameToEmail(trimmed),
+        email: trimmedEmail,
         password,
-        options: { data: { username: trimmed } },
+        options: { data: { username: trimmedUsername } },
       });
       if (err) throw err;
       if (!data.user) {
@@ -37,7 +47,7 @@ export default function Register() {
       }
       const { error: profileErr } = await supabase.from('profiles').insert({
         id: data.user.id,
-        username: trimmed,
+        username: trimmedUsername,
         gold: 100,
         has_auto_roll: false,
         has_quick_roll: false,
@@ -51,7 +61,7 @@ export default function Register() {
         login(data.session.access_token);
         navigate('/');
       } else {
-        setError('Check your inbox to confirm your account, then sign in.');
+        setError('Check your email to confirm your account, then sign in.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
@@ -67,6 +77,15 @@ export default function Register() {
         <p className="text-slate-400 text-center text-sm mb-6">Create your account</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+            required
+            autoComplete="email"
+          />
+          <input
             type="text"
             placeholder="Username (2–20 characters)"
             value={username}
@@ -75,6 +94,7 @@ export default function Register() {
             required
             minLength={2}
             maxLength={20}
+            autoComplete="username"
           />
           <input
             type="password"
@@ -84,6 +104,7 @@ export default function Register() {
             className="w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             required
             minLength={6}
+            autoComplete="new-password"
           />
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
