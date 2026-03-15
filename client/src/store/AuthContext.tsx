@@ -11,7 +11,7 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   login: (token: string) => Promise<UserMe | null>;
   logout: () => void;
-  refreshUser: () => Promise<void>;
+  refreshUser: () => Promise<UserMe | null>;
   setGold: (n: number) => void;
   setHasAutoRoll: (v: boolean) => void;
   setHasQuickRoll: (v: boolean) => void;
