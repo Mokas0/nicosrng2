@@ -9,6 +9,7 @@ import Inventory from '../components/Inventory';
 import { AUTO_ROLL_INTERVAL_MS } from '../game/constants';
 
 const PASSIVE_GOLD_INTERVAL_MS = 30_000;
+const USERNAME_CHANGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 export default function Dashboard() {
   const { user, setGold, refreshUser } = useAuth();
@@ -19,6 +20,10 @@ export default function Dashboard() {
   const [autoRollEnabled, setAutoRollEnabled] = useState(false);
   const [showIntro, setShowIntro] = useState(() => !sessionStorage.getItem('fame-intro-seen'));
   const [showInventory, setShowInventory] = useState(false);
+  const [showUsernameModal, setShowUsernameModal] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [usernameError, setUsernameError] = useState('');
+  const [usernameLoading, setUsernameLoading] = useState(false);
   const [usePotionId, setUsePotionId] = useState<string | ''>('');
   const autoRollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const passiveGoldTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -102,6 +107,30 @@ export default function Dashboard() {
 
   const canRoll = user && !rolling;
 
+  const usernameChangedAt = user?.usernameChangedAt ? new Date(user.usernameChangedAt).getTime() : 0;
+  const canChangeUsername = Date.now() - usernameChangedAt >= USERNAME_CHANGE_COOLDOWN_MS;
+  const daysUntilNextChange = canChangeUsername
+    ? 0
+    : Math.ceil((USERNAME_CHANGE_COOLDOWN_MS - (Date.now() - usernameChangedAt)) / (24 * 60 * 60 * 1000));
+
+  async function handleChangeUsername(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = newUsername.trim();
+    if (!trimmed || !user) return;
+    setUsernameError('');
+    setUsernameLoading(true);
+    try {
+      await userApi.changeUsername(trimmed);
+      await refreshUser();
+      setShowUsernameModal(false);
+      setNewUsername('');
+    } catch (err) {
+      setUsernameError(err instanceof Error ? err.message : 'Failed to change username');
+    } finally {
+      setUsernameLoading(false);
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-900">
       {showIntro && (
@@ -125,7 +154,18 @@ export default function Dashboard() {
           <span className="text-amber-400 font-semibold flex items-center gap-1">
             <span className="text-lg">🪙</span> {user?.gold ?? 0} Gold
           </span>
-          <span className="text-slate-400 text-sm">{user?.username}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setNewUsername(user?.username ?? '');
+              setUsernameError('');
+              setShowUsernameModal(true);
+            }}
+            className="text-slate-400 hover:text-amber-400 text-sm font-medium"
+            title="Change username (once per week)"
+          >
+            {user?.username}
+          </button>
           <button
             onClick={() => {
               localStorage.removeItem('token');
@@ -206,6 +246,59 @@ export default function Dashboard() {
       ) : null)}
       {showInventory && user && (
         <Inventory auras={user.auras} onClose={() => setShowInventory(false)} />
+      )}
+      {showUsernameModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !usernameLoading && setShowUsernameModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="username-modal-title"
+        >
+          <div
+            className="bg-slate-800 rounded-xl border border-slate-600 p-6 w-full max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="username-modal-title" className="font-display text-lg font-bold text-amber-400 mb-2">
+              Change username
+            </h2>
+            <p className="text-slate-400 text-sm mb-3">Usernames are unique. You can change once per week.</p>
+            {!canChangeUsername && (
+              <p className="text-amber-400/90 text-sm mb-3">Next change available in {daysUntilNextChange} day(s).</p>
+            )}
+            <form onSubmit={handleChangeUsername} className="space-y-3">
+              <input
+                type="text"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="New username"
+                minLength={2}
+                maxLength={24}
+                disabled={!canChangeUsername || usernameLoading}
+                className="w-full rounded-lg bg-slate-700 border border-slate-600 text-white px-3 py-2 text-sm placeholder-slate-500 disabled:opacity-50"
+                autoFocus
+              />
+              {usernameError && <p className="text-red-400 text-sm">{usernameError}</p>}
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowUsernameModal(false)}
+                  disabled={usernameLoading}
+                  className="px-3 py-2 rounded-lg text-slate-400 hover:text-white text-sm disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canChangeUsername || usernameLoading || newUsername.trim().length < 2}
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-900 font-semibold text-sm"
+                >
+                  {usernameLoading ? 'Saving...' : 'Change'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

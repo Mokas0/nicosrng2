@@ -14,6 +14,9 @@ const AUTO_ROLL_PRICE = 5000;
 const QUICK_ROLL_PRICE = 2500;
 const PASSIVE_GOLD_INTERVAL_MS = 30_000;
 const PASSIVE_GOLD_AMOUNT = 5;
+const USERNAME_CHANGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const USERNAME_MIN_LENGTH = 2;
+const USERNAME_MAX_LENGTH = 24;
 
 function json(body: unknown, status = 200) {
   return { statusCode: status, body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } };
@@ -100,7 +103,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     const authErr = requireAuth();
     if (authErr) return authErr.response;
     if (!user) return json({ error: 'Unauthorized' }, 401);
-    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll').eq('id', user.id).single();
+    let { data: profile } = await supabaseAdmin.from('profiles').select('id, username, gold, has_auto_roll, has_quick_roll, username_changed_at').eq('id', user.id).single();
     if (!profile) {
       const base = (user.user_metadata?.username as string) || user.email?.split('@')[0] || 'player';
       const username = base.slice(0, 18) + (user.id.slice(0, 2)); // ensure unique
@@ -113,7 +116,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         created_at: new Date().toISOString(),
       });
       if (insertErr) return json({ error: 'Profile not found' }, 404);
-      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false };
+      profile = { id: user.id, username, gold: 100, has_auto_roll: false, has_quick_roll: false, username_changed_at: null };
     }
     const { data: inv } = await supabaseAdmin.from('user_auras').select('aura_id, obtained_at').eq('user_id', user.id);
     const { data: aurasCatalog } = await supabaseAdmin.from('auras').select('id, name, rarity, chance, visual_id, description');
@@ -143,15 +146,50 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         goldCost: p?.gold_cost ?? 0,
       };
     });
+    const usernameChangedAt = (profile as { username_changed_at?: string | null }).username_changed_at ?? null;
     return json({
       id: profile.id,
       username: profile.username,
       gold: profile.gold,
       hasAutoRoll: profile.has_auto_roll,
       hasQuickRoll: profile.has_quick_roll,
+      usernameChangedAt,
       auras,
       potionInventory,
     });
+  }
+
+  // POST /api/user/change-username – body: { username: string }, once per week, unique
+  if (path === '/user/change-username' && method === 'POST') {
+    const authErr = requireAuth();
+    if (authErr) return authErr.response;
+    if (!user) return json({ error: 'Unauthorized' }, 401);
+    let body: { username?: string } = {};
+    try {
+      body = event.body ? JSON.parse(event.body) : {};
+    } catch {
+      return err('Invalid JSON');
+    }
+    const raw = typeof body.username === 'string' ? body.username.trim() : '';
+    if (raw.length < USERNAME_MIN_LENGTH || raw.length > USERNAME_MAX_LENGTH) {
+      return err(`Username must be ${USERNAME_MIN_LENGTH}–${USERNAME_MAX_LENGTH} characters`);
+    }
+    const username = raw.slice(0, USERNAME_MAX_LENGTH);
+    const { data: profile } = await supabaseAdmin.from('profiles').select('username, username_changed_at').eq('id', user.id).single();
+    if (!profile) return json({ error: 'Profile not found' }, 404);
+    const changedAt = (profile as { username_changed_at?: string | null }).username_changed_at;
+    if (changedAt) {
+      const elapsed = Date.now() - new Date(changedAt).getTime();
+      if (elapsed < USERNAME_CHANGE_COOLDOWN_MS) {
+        const daysLeft = Math.ceil((USERNAME_CHANGE_COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000));
+        return err(`You can change your username again in ${daysLeft} day(s)`);
+      }
+    }
+    const { data: taken } = await supabaseAdmin.from('profiles').select('id').eq('username', username).neq('id', user.id).maybeSingle();
+    if (taken) return err('Username is already taken');
+    const { error: updateErr } = await supabaseAdmin.from('profiles').update({ username, username_changed_at: new Date().toISOString() }).eq('id', user.id);
+    if (updateErr) return json({ error: updateErr.message }, 400);
+    return json({ username, success: true });
   }
 
   // GET /api/potions – catalog for shop (no auth required)

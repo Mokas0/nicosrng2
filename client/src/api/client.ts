@@ -52,6 +52,7 @@ export interface UserMe {
   gold: number;
   hasAutoRoll: boolean;
   hasQuickRoll: boolean;
+  usernameChangedAt?: string | null;
   auras: InventoryAura[];
   potionInventory?: PotionInventoryItem[];
 }
@@ -82,6 +83,11 @@ export const auth = {
 export const user = {
   me: () => api<UserMe>('/user/me'),
   passiveGold: () => api<{ gold: number; granted: number }>('/user/passive-gold', { method: 'POST' }),
+  changeUsername: (username: string) =>
+    api<{ username: string; success: boolean }>('/user/change-username', {
+      method: 'POST',
+      body: JSON.stringify({ username: username.trim() }),
+    }),
 };
 
 export const roll = {
