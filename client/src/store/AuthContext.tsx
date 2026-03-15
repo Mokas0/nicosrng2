@@ -9,7 +9,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (token: string) => Promise<void>;
+  login: (token: string) => Promise<UserMe | null>;
   logout: () => void;
   refreshUser: () => Promise<void>;
   setGold: (n: number) => void;
@@ -22,14 +22,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, loading: true, error: null });
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async (): Promise<UserMe | null> => {
     const token = localStorage.getItem('token');
     if (!token) {
       setState({ user: null, loading: false, error: null });
-      return;
+      return null;
     }
     const me = await user.me();
     setState((s) => ({ ...s, user: me, loading: false, error: null }));
+    return me;
   }, []);
 
   useEffect(() => {
@@ -66,10 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [refreshUser]);
 
-  const login = useCallback(async (token: string) => {
+  const login = useCallback(async (token: string): Promise<UserMe | null> => {
     localStorage.setItem('token', token);
     try {
-      await refreshUser();
+      return await refreshUser();
     } catch (e) {
       localStorage.removeItem('token');
       setState((s) => ({ ...s, user: null, loading: false }));

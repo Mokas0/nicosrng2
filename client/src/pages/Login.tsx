@@ -20,19 +20,31 @@ export default function Login() {
         email: email.trim().toLowerCase(),
         password,
       });
-      if (err) throw err;
-      if (data.session?.access_token) {
-        await login(data.session.access_token);
-        navigate('/');
+      if (err) {
+        setError(err.message || 'Invalid email or password.');
+        return;
+      }
+      if (!data.session?.access_token) {
+        setError('Login failed. No session returned.');
+        return;
+      }
+      const me = await login(data.session.access_token);
+      if (me) {
+        navigate('/', { replace: true });
       } else {
-        setError('Login failed');
+        setError('Could not load your profile. Try again.');
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Login failed';
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : 'Sign-in failed. Try again.';
       if (msg === 'Profile not found' || msg.includes('profile')) {
         setError('Account not set up. Please register first.');
-      } else if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) {
-        setError('Cannot reach server. Check your connection or try again later.');
+      } else if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed') || msg.includes('Load')) {
+        setError('Cannot reach server. If you\'re testing locally, run "npx netlify dev" so the API works.');
       } else {
         setError(msg);
       }
